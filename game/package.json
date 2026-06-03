@@ -1,0 +1,33 @@
+{
+  "name": "go-fuck-yourself",
+  "version": "1.0.0",
+  "description": "Go Fuck Yourself - an unfiltered Go Fish drinking game with an NVIDIA-powered AI host that roasts you, scans your drinks via computer vision, and tracks how wasted you are.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "drinking-game",
+    "go-fish",
+    "nvidia",
+    "llm",
+    "computer-vision",
+    "party"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "go-fuck-yourself": "file:",
+    "gsap": "^3.12.7",
+    "matter-js": "^0.20.0",
+    "three": "^0.184.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "vite": "^6.3.5",
+    "vite-plugin-pwa": "^0.21.2"
+  }
+}

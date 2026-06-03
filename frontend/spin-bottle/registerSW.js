@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/spin-bottle/sw.js', { scope: '/spin-bottle/' })})}

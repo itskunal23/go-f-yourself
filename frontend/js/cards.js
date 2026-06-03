@@ -1,0 +1,766 @@
+import gsap from '/vendor/gsap/index.js';
+import { RANKS, rankMeta, categoryMeta } from './game.js?v=63';
+import { sanitizeCategories, DEFAULT_CATEGORIES } from './card-categories.js';
+import { GameAudio as CardAudio } from './game-audio.js?v=63';
+import { haptic } from './mobile.js';
+import { isTouchDevice, wireTap } from './touch-ui.js?v=2';
+import {
+  CardStackModel,
+  buildCardStackView,
+  CardStackAnimator,
+  bindStackDeck,
+  refreshStackDeckIndices,
+} from './card-stacks.js?v=4';
+import {
+  createTransformGhost,
+  timelineCardTravel,
+  pulseCardLand,
+  motionEase,
+  motionScale,
+  EASE_SETTLE,
+  DUR,
+} from './motion.js?v=1';
+
+function esc(s) {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+/** Orange fish blob — board-game cartoon style */
+function fishBody(id, { mouth = 'o', eye = 'normal' } = {}) {
+  const mouthPath = {
+    o: '<ellipse cx="62" cy="52" rx="8" ry="10" fill="#1a2a5e"/>',
+    gag: '<path d="M54 48 Q62 58 70 48" stroke="#1a2a5e" stroke-width="3" fill="none"/>',
+    grin: '<path d="M54 50 Q62 58 70 50" stroke="#1a2a5e" stroke-width="2.5" fill="none"/>',
+    shock: '<ellipse cx="62" cy="52" rx="10" ry="12" fill="#1a2a5e"/>',
+  }[mouth] || '';
+  const eyeExtra = eye === 'lazy'
+    ? '<circle cx="48" cy="38" r="2" fill="#1a2a5e"/>'
+    : eye === 'x'
+      ? '<path d="M44 34 L52 42 M52 34 L44 42" stroke="#1a2a5e" stroke-width="2"/>'
+      : '';
+  return `
+    <g class="gfy-fish" id="${id}">
+      <ellipse cx="62" cy="56" rx="34" ry="26" fill="#ff6b2c"/>
+      <ellipse cx="38" cy="54" rx="10" ry="14" fill="#ff6b2c"/>
+      <circle cx="50" cy="40" r="7" fill="#fff"/>
+      <circle cx="52" cy="40" r="3.5" fill="#1a2a5e"/>
+      ${eyeExtra}
+      ${mouthPath}
+      <path d="M88 52 L98 48 L98 60 Z" fill="#ff6b2c"/>
+    </g>`;
+}
+
+/** Animated scene per card — Kunal/Nandini lore, explicit cartoon motion */
+const CARD_ART = {
+  whiskeydick: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      ${fishBody('f-wd', { mouth: 'shock', eye: 'x' })}
+      <g class="gfy-anim-whiskey">
+        <rect x="88" y="16" width="14" height="36" rx="4" fill="#8B4513"/>
+        <rect x="90" y="12" width="10" height="6" rx="2" fill="#D2691E"/>
+        <text x="91" y="34" font-size="7" fill="#fff">🥃</text>
+      </g>
+      <g class="gfy-anim-limp">
+        <path d="M76 58 Q82 68 88 58" stroke="#e8182a" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <circle cx="88" cy="58" r="4" fill="#e8182a" opacity="0.6"/>
+      </g>
+      <text class="gfy-anim-dead" x="14" y="24" font-size="9" fill="#ff453a">DEAD</text>
+    </svg>`,
+  narrowmouth: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      <g class="gfy-anim-kneel">${fishBody('f-nm', { mouth: 'grin' })}</g>
+      <ellipse class="gfy-anim-narrow-mouth" cx="62" cy="52" rx="4" ry="2" fill="#1a2a5e"/>
+      <g class="gfy-anim-thrust-blocked">
+        <rect x="54" y="18" width="16" height="26" rx="8" fill="#ff6b2c"/>
+        <circle cx="62" cy="16" r="7" fill="#ff6b2c"/>
+        <text x="72" y="28" font-size="10" fill="#ff453a">✕</text>
+      </g>
+      <text class="gfy-anim-tap" x="8" y="78" font-size="8" fill="#64d2ff">won't open</text>
+    </svg>`,
+  fivestrokes: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      ${fishBody('f-fs', { mouth: 'shock', eye: 'lazy' })}
+      <g class="gfy-anim-five-stroke">
+        <rect x="84" y="36" width="14" height="28" rx="7" fill="#ff6b2c"/>
+        <circle cx="91" cy="34" r="7" fill="#ff6b2c"/>
+        <ellipse cx="88" cy="50" rx="16" ry="10" fill="#ffb347" class="gfy-anim-tired-hand"/>
+      </g>
+      <text class="gfy-anim-stroke-count" x="72" y="28" font-size="16" font-weight="800" fill="#ff453a">5</text>
+      <text x="68" y="78" font-size="8" fill="#ff453a">exhausted</text>
+    </svg>`,
+  swallow: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      ${fishBody('f-sw', { mouth: 'o' })}
+      <ellipse class="gfy-anim-gulp" cx="62" cy="52" rx="10" ry="6" fill="#ff6b2c" opacity="0.35"/>
+      <path class="gfy-anim-drip" d="M68 58 Q72 72 76 58" stroke="#64d2ff" stroke-width="3" fill="none"/>
+      <ellipse class="gfy-anim-drip2" cx="72" cy="74" rx="4" ry="6" fill="#64d2ff"/>
+      <text class="gfy-anim-gulp-text" x="74" y="66" font-size="9" fill="#64d2ff">Kunal's</text>
+    </svg>`,
+  facefuck: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      <g class="gfy-anim-push">${fishBody('f-ff', { mouth: 'gag' })}</g>
+      <rect class="gfy-anim-shaft" x="8" y="38" width="28" height="12" rx="6" fill="#ff6b2c"/>
+      <rect class="gfy-anim-hand" x="18" y="44" width="22" height="14" rx="6" fill="#ffb347"/>
+      <text x="88" y="20" font-size="8" fill="#bf5af2">Kunal</text>
+    </svg>`,
+  doggyspank: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      <g class="gfy-anim-doggy-pose" transform="rotate(-25 62 56)">${fishBody('f-dg', { mouth: 'shock' })}</g>
+      <ellipse cx="88" cy="48" rx="14" ry="10" fill="#ff453a" opacity="0.45" class="gfy-anim-spark"/>
+      <g class="gfy-anim-slap">
+        <ellipse cx="96" cy="40" rx="12" ry="8" fill="#ffb347"/>
+        <text x="92" y="44" font-size="14" class="gfy-anim-smack">💥</text>
+      </g>
+      <text x="8" y="78" font-size="8" fill="#ffd60a">doggy</text>
+    </svg>`,
+  doggycum: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      <g class="gfy-anim-doggy-bounce" transform="rotate(-20 62 56)">${fishBody('f-dc', { mouth: 'shock', eye: 'x' })}</g>
+      <text class="gfy-anim-timer" x="78" y="32" font-size="13" font-weight="800" fill="#e8182a">0:28</text>
+      <g class="gfy-anim-splash">
+        <circle cx="98" cy="24" r="3" fill="#64d2ff"/>
+        <circle cx="104" cy="30" r="2" fill="#64d2ff"/>
+        <circle cx="92" cy="28" r="2" fill="#64d2ff"/>
+      </g>
+      <text x="10" y="78" font-size="8" fill="#ff453a">too fast</text>
+    </svg>`,
+  losthole: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      ${fishBody('f-lh', { mouth: 'shock', eye: 'lazy' })}
+      <g class="gfy-anim-search">
+        <circle cx="88" cy="44" r="14" fill="none" stroke="#64d2ff" stroke-width="2" stroke-dasharray="4 3"/>
+        <path d="M98 54 L106 62" stroke="#64d2ff" stroke-width="2"/>
+        <text x="82" y="48" font-size="10">?</text>
+      </g>
+      <text class="gfy-anim-lost-timer" x="8" y="24" font-size="11" font-weight="800" fill="#ffd60a">45:00</text>
+      <text x="8" y="78" font-size="8" fill="#64d2ff">wrong hole</text>
+    </svg>`,
+  choke: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      ${fishBody('f-ch', { mouth: 'shock' })}
+      <ellipse class="gfy-anim-choke-neck" cx="62" cy="48" rx="14" ry="8" fill="#ff453a" opacity="0.35"/>
+      <g class="gfy-anim-choke-hand">
+        <ellipse cx="62" cy="46" rx="16" ry="10" fill="#ffb347" opacity="0.85"/>
+        <path d="M48 46 Q62 38 76 46" stroke="#1a2a5e" stroke-width="2" fill="none"/>
+      </g>
+      <text class="gfy-anim-tap" x="84" y="40" font-size="11" fill="#64d2ff">TAP</text>
+    </svg>`,
+  cncpin: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      <g class="gfy-anim-struggle">${fishBody('f-cnc', { mouth: 'shock' })}</g>
+      <rect class="gfy-anim-pin-l" x="14" y="38" width="18" height="10" rx="5" fill="#ffb347" opacity="0.9"/>
+      <rect class="gfy-anim-pin-r" x="92" y="38" width="18" height="10" rx="5" fill="#ffb347" opacity="0.9"/>
+      <text x="52" y="24" font-size="12">⛓️</text>
+      <text class="gfy-anim-stop" x="38" y="78" font-size="9" fill="#bf5af2">stop / start</text>
+    </svg>`,
+  familydoor: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      <rect x="8" y="12" width="36" height="64" rx="4" fill="#8ecae6" opacity="0.5"/>
+      <g class="gfy-anim-door">
+        <rect x="10" y="14" width="14" height="60" rx="2" fill="#ffb347"/>
+        <circle cx="20" cy="44" r="2" fill="#1a2a5e"/>
+      </g>
+      ${fishBody('f-fd', { mouth: 'shock' })}
+      <text class="gfy-anim-dad" x="14" y="28" font-size="12">👨</text>
+      <text x="58" y="78" font-size="8" fill="#ff453a">Kunal+Nandini</text>
+    </svg>`,
+  momfaint: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      ${fishBody('f-mf', { mouth: 'grin' })}
+      <g class="gfy-anim-faint">
+        <text x="58" y="24" font-size="16">👩</text>
+        <path d="M54 30 Q62 42 70 30" stroke="#ff453a" stroke-width="2" fill="none"/>
+        <text x="52" y="52" font-size="9" fill="#ff453a">CNC?!</text>
+      </g>
+      <text x="72" y="72" font-size="14">😵</text>
+    </svg>`,
+  familyroast: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      ${fishBody('f-fr', { mouth: 'grin' })}
+      <g class="gfy-anim-roast">
+        <text x="48" y="22" font-size="14">👨</text>
+        <text x="72" y="22" font-size="14">👩</text>
+        <text x="52" y="38" font-size="9" fill="#ff453a">horny</text>
+      </g>
+      <text x="58" y="58" font-size="10">K+N</text>
+    </svg>`,
+  default: `
+    <svg viewBox="0 0 124 88" class="gfy-art-svg" aria-hidden="true">
+      ${fishBody('f-def', { mouth: 'grin' })}
+    </svg>`,
+};
+
+function cardFaceHtml(rank, { large = false } = {}) {
+  const meta = rankMeta(rank);
+  const cat = categoryMeta(meta.category);
+  const sizeCls = large ? ' gfy-card-face--lg' : '';
+  const line = meta.line || rank;
+  const art = CARD_ART[meta.art] || CARD_ART.default;
+
+  return `
+    <article class="gfy-card-face gfy-card-official gfy-cat-${esc(cat.id)}${sizeCls}" aria-label="${esc(line)}" style="--cat-accent:${cat.accent}">
+      <div class="gfy-card-inner">
+        <span class="gfy-cat-badge" title="${esc(cat.label)}">${cat.emoji} ${esc(cat.short)}</span>
+        <p class="gfy-oneliner">${esc(line)}</p>
+        <div class="gfy-art gfy-art--${esc(meta.art || 'default')}">${art}</div>
+      </div>
+    </article>`;
+}
+
+/** Face-down opponent hand — plain white (table view from across) */
+export function renderOpponentCardBack({ mini = false } = {}) {
+  const sizeCls = mini ? ' gfy-card-back--mini' : '';
+  return `<article class="gfy-card-back gfy-card-back--plain${sizeCls}" aria-hidden="true"></article>`;
+}
+
+/** Card back — matte black box of secrets (physical GFY deck) */
+export function renderCardBack({ large = false, mini = false, deck = false } = {}) {
+  const sizeCls = large ? ' gfy-card-back--lg' : mini || deck ? ' gfy-card-back--mini' : '';
+  const deckCls = deck ? ' gfy-card-back--deck' : '';
+  const est = large ? '<span class="gfy-back-est">EST. BAD DECISIONS</span>' : '';
+  return `<article class="gfy-card-back gfy-card-back--official gfy-card-back--orange gfy-card-back--secrets${sizeCls}${deckCls}" aria-hidden="true">
+    <div class="gfy-back-texture" aria-hidden="true"></div>
+    <div class="gfy-back-stack" aria-hidden="true">
+      <span class="gfy-back-line">GO</span>
+      <span class="gfy-back-line gfy-back-line--cream">FUCK</span>
+      <span class="gfy-back-line">YOURSELF</span>
+    </div>
+    ${est}
+    <div class="gfy-back-icons" aria-hidden="true"><span>🍹</span><span>💀</span><span>🦖</span><span>🚩</span></div>
+  </article>`;
+}
+
+export function renderPhysicalDeck(count) {
+  if (!count) return '<div class="deck-empty">Pond dry</div>';
+  const layers = Math.min(7, Math.max(4, Math.ceil(Math.log2(count + 2))));
+  let html = '';
+  for (let i = 0; i < layers; i++) {
+    const rot = -14 + i * 4 + (i % 2 ? 3 : -2);
+    const tx = (i % 3) * 3 - 3 + (i * 1.2);
+    const ty = -i * 2 + (i % 2);
+    html += `<div class="deck-layer" style="transform:translate(${tx}px, ${ty}px) rotate(${rot}deg)">${renderCardBack({ deck: true })}</div>`;
+  }
+  return html;
+}
+
+export function renderOpponentHandVisual(count, { maxShow = 5 } = {}) {
+  if (!count) return '<div class="opp-hand-empty">—</div>';
+  const show = Math.min(count, maxShow);
+  let html = '<div class="opp-hand-fan">';
+  const mid = (show - 1) / 2;
+  for (let i = 0; i < show; i++) {
+    const rot = show > 1 && mid ? ((i - mid) / mid) * 18 : 0;
+    html += `<span class="opp-mini-slot" style="--opp-rot:${rot}deg;--opp-i:${i}">${renderOpponentCardBack({ mini: true })}</span>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+export function stackLayout(index, total) {
+  if (total <= 1) return { rot: 0, arc: 0, overlap: 0, stackY: 0, z: 1 };
+  const step = 5;
+  const mid = (total - 1) / 2;
+  const rot = mid ? ((index - mid) / mid) * 2.5 : 0;
+  return { rot, arc: 0, overlap: -4, stackY: index * step, z: index + 1 };
+}
+
+export function setProgressBlocks(count, total = 4) {
+  return Array.from({ length: total }, (_, i) =>
+    `<span class="set-block${i < count ? ' filled' : ''}" aria-hidden="true"></span>`,
+  ).join('');
+}
+
+export function setProgressLabel(count, total = 4) {
+  const need = Math.max(0, total - count);
+  if (count >= total) return 'Complete!';
+  if (need === 1) return 'Need 1 more';
+  return `Need ${need} more`;
+}
+
+export function fanLayout(index, total) {
+  if (total <= 1) return { rot: 0, arc: 0, overlap: 0, z: 1 };
+  const mid = (total - 1) / 2;
+  const t = total > 9 ? 9 / total : 1;
+  const maxRot = total <= 4 ? 14 : total <= 6 ? 20 : total <= 9 ? 26 : 30;
+  const rot = mid ? ((index - mid) / mid) * maxRot * t : 0;
+  const arc = Math.abs(index - mid) * (total > 6 ? 2.8 : 3.5);
+  const overlap = total > 10 ? -50 : total > 8 ? -46 : total > 5 ? -42 : -38;
+  return { rot, arc, overlap, z: index + 1 };
+}
+
+/** Hand carousel — fixed readable cards, horizontal scroll, no fan rotation */
+export const HAND_CARD_W = 108;
+export const HAND_CARD_H = 132;
+export const HAND_CARD_GAP = 12;
+
+export function handCarouselLayout(index, total) {
+  return {
+    rot: 0,
+    arc: 0,
+    overlap: 0,
+    gap: HAND_CARD_GAP,
+    cardW: HAND_CARD_W,
+    cardH: HAND_CARD_H,
+    z: index + 1,
+    total,
+  };
+}
+
+/** @deprecated Use handCarouselLayout */
+export function fanHandLayout(index, total, viewportW = 390) {
+  return handCarouselLayout(index, total);
+}
+
+export function buildCardElement(card, opts = {}) {
+  const total = opts.total || 1;
+  const i = opts.index || 0;
+  const layoutFn = opts.grouped ? stackLayout : fanLayout;
+  const { rot, arc, overlap, stackY = 0, z } = layoutFn(i, total);
+  const lift = opts.selected ? -22 : (opts.playable ? -8 : 0);
+
+  const el = document.createElement('div');
+  el.className = 'gfy-card-slot'
+    + (opts.grouped ? ' gfy-card-slot--stacked' : '')
+    + (opts.selected ? ' selected' : '')
+    + (opts.playable ? ' playable' : '');
+  el.dataset.rank = card.rank || '';
+  el.style.setProperty('--fan-rot', `${rot}deg`);
+  el.style.setProperty('--fan-arc', `${arc}px`);
+  el.style.setProperty('--fan-lift', `${lift}px`);
+  el.style.setProperty('--fan-overlap', `${overlap}px`);
+  el.style.setProperty('--fan-z', z);
+  if (opts.grouped) el.style.setProperty('--stack-y', `${stackY}px`);
+  el.innerHTML = cardFaceHtml(card.rank);
+
+  if (opts.playable && !isTouchDevice) {
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', `Ask for ${rankMeta(card.rank).line || card.rank}`);
+    el.addEventListener('pointerenter', () => {
+      gsap.to(el, { y: opts.grouped ? -14 : -20, scale: 1.06, rotate: 0, duration: 0.25, ease: 'back.out(1.4)' });
+    });
+    el.addEventListener('pointerleave', () => {
+      gsap.to(el, { y: 0, scale: opts.selected ? 1.04 : 1, rotate: rot, duration: 0.3, ease: 'power2.out' });
+    });
+  } else if (opts.playable) {
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', `Ask for ${rankMeta(card.rank).line || card.rank}`);
+  }
+
+  return el;
+}
+
+export function buildHandGroupElement(rank, cards, opts = {}) {
+  return buildRankCardElement(rank, cards, opts);
+}
+
+function buildVisualStackHtml(count) {
+  if (count <= 0) return '';
+  const layers = Math.min(count, 3);
+  let html = '<div class="hand-visual-stack" aria-hidden="true">';
+  for (let i = layers - 1; i >= 0; i--) {
+    html += `<span class="hand-visual-stack-layer" style="--stack-i:${i}"></span>`;
+  }
+  html += '</div>';
+  if (count > 1) {
+    html += `<span class="hand-stack-count" aria-label="${count} cards">${count}</span>`;
+  }
+  return html;
+}
+
+function collectionTier(maxCount) {
+  if (maxCount >= 4) return 'complete';
+  if (maxCount >= 3) return 'hot';
+  if (maxCount >= 2) return 'warm';
+  return 'cold';
+}
+
+function collectionChaseLine(maxCount, bestRank) {
+  if (maxCount >= 4) return 'Create your set now';
+  if (maxCount === 3) return `One card away — chase ${bestRank ? rankMeta(bestRank).line.slice(0, 28) : 'this set'}`;
+  if (maxCount === 2) return 'Mid progress — keep building';
+  return 'Early collection — ask wide';
+}
+
+export function groupHandByCollection(hand, activeCategories = DEFAULT_CATEGORIES) {
+  const byCat = new Map();
+  for (const catId of sanitizeCategories(activeCategories)) {
+    byCat.set(catId, []);
+  }
+  const rankMap = new Map();
+  for (const c of hand) {
+    if (!c.rank) continue;
+    if (!rankMap.has(c.rank)) rankMap.set(c.rank, []);
+    rankMap.get(c.rank).push(c);
+  }
+  for (const [rank, cards] of rankMap) {
+    const cat = cards[0]?.category || rankMeta(rank).category;
+    if (!byCat.has(cat)) byCat.set(cat, []);
+    byCat.get(cat).push({ rank, cards, count: cards.length });
+  }
+  for (const ranks of byCat.values()) {
+    ranks.sort((a, b) => b.count - a.count);
+  }
+  const sections = [];
+  for (const [catId, ranks] of byCat) {
+    if (!ranks.length) continue;
+    const maxCount = Math.max(...ranks.map((r) => r.count));
+    const best = ranks.find((r) => r.count === maxCount) || ranks[0];
+    const priority = maxCount >= 4 ? 1000 : maxCount === 3 ? 900 : maxCount === 2 ? 500 : 100;
+    sections.push({ catId, ranks, maxCount, bestRank: best.rank, priority, tier: collectionTier(maxCount) });
+  }
+  sections.sort((a, b) => b.priority - a.priority || b.maxCount - a.maxCount);
+  return sections;
+}
+
+export function computeSuggestedAsk(hand, askableRanks = []) {
+  if (!askableRanks?.length) return null;
+  const counts = new Map();
+  for (const c of hand) {
+    if (c.rank) counts.set(c.rank, (counts.get(c.rank) || 0) + 1);
+  }
+  let best = null;
+  let bestScore = -1;
+  for (const rank of askableRanks) {
+    const count = counts.get(rank) || 0;
+    let score = count * 100 + (count === 3 ? 500 : count === 2 ? 200 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      const meta = rankMeta(rank);
+      best = {
+        rank,
+        count,
+        meta,
+        category: meta.category,
+        probability: count >= 3 ? 'High' : count >= 2 ? 'Medium' : 'Low',
+      };
+    }
+  }
+  return best;
+}
+
+export function computeBestCollection(collections) {
+  if (!collections?.length) return null;
+  const top = collections[0];
+  const cat = categoryMeta(top.catId);
+  return { catId: top.catId, cat, maxCount: top.maxCount, tier: top.tier };
+}
+
+function stackArtHtmlForRank(rank) {
+  const meta = rankMeta(rank);
+  const art = CARD_ART[meta.art] || CARD_ART.default;
+  return `<div class="card-stack__art">${art}</div>`;
+}
+
+function buildRankCardElement(rank, cards, opts = {}) {
+  const model = CardStackModel.fromRank(rank, cards);
+  const shelf = !!opts.shelf;
+  const handStrip = !!opts.handStrip;
+  const el = buildCardStackView(model, {
+    ...opts,
+    shelf,
+    handStrip,
+    compact: shelf && !handStrip ? false : (opts.compact ?? true),
+    artHtml: shelf && !handStrip ? stackArtHtmlForRank(rank) : undefined,
+  });
+
+  const activate = (e) => {
+    e?.stopPropagation?.();
+    if (opts.onPreview) {
+      opts.onPreview(cards[cards.length - 1], el);
+      return;
+    }
+    if (opts.playable && !opts.filtered) opts.onAsk?.(rank, el);
+  };
+
+  if (opts.playable && !opts.filtered && opts.onAsk) {
+    el.dataset.dragAsk = '1';
+  } else {
+    wireTap(el, activate);
+  }
+
+  return el;
+}
+
+function buildCollectionSection(section, opts = {}) {
+  const cat = categoryMeta(section.catId);
+  const el = document.createElement('section');
+  el.className = `hand-collection-section hand-collection--${section.tier}`;
+  el.dataset.category = section.catId;
+  el.dataset.catId = section.catId;
+  el.style.setProperty('--cat-accent', cat.accent);
+
+  el.innerHTML = `
+    <header class="hand-collection-header">
+      <div class="hand-collection-title-row">
+        <span class="hand-collection-title">${cat.emoji} ${esc(cat.short.toUpperCase())}</span>
+        <span class="hand-collection-ratio">${section.maxCount}/4</span>
+      </div>
+      <div class="hand-set-blocks hand-collection-blocks" aria-label="${section.maxCount} of 4">${setProgressBlocks(section.maxCount)}</div>
+    </header>`;
+
+  const deck = document.createElement('div');
+  deck.className = 'stack-deck';
+  deck.dataset.category = section.catId;
+  deck.setAttribute('aria-label', `${cat.label} card stack`);
+
+  const suggestedRank = opts.suggested?.rank;
+  const n = section.ranks.length;
+  section.ranks.forEach(({ rank, cards }, i) => {
+    const filtered = opts.categoryFilter && cards[0]?.category !== opts.categoryFilter;
+    const canAsk = opts.playable && opts.askableRanks?.includes(rank);
+    const stack = buildRankCardElement(rank, cards, {
+      playable: canAsk,
+      filtered,
+      suggested: rank === suggestedRank,
+      onAsk: opts.onAsk,
+      onPreview: opts.onPreview,
+    });
+    stack.style.setProperty('--deck-i', String(i));
+    stack.style.setProperty('--deck-n', String(n));
+    deck.appendChild(stack);
+  });
+
+  el.appendChild(deck);
+  bindStackDeck(deck);
+  return el;
+}
+
+export function buildHandFan(hand, opts = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'hand-shelf-scroller hand-shelf-scroller--carousel';
+
+  const rankMap = new Map();
+  for (const c of hand) {
+    if (!c.rank) continue;
+    if (!rankMap.has(c.rank)) rankMap.set(c.rank, []);
+    rankMap.get(c.rank).push(c);
+  }
+  const groups = [...rankMap.entries()]
+    .map(([rank, cards]) => ({ rank, cards, count: cards.length }))
+    .sort((a, b) => b.count - a.count || a.rank.localeCompare(b.rank));
+
+  if (!groups.length) {
+    wrap.innerHTML = '<div class="empty-hand">Drawing from the fuck pond…</div>';
+    return wrap;
+  }
+
+  const shelf = document.createElement('div');
+  shelf.className = 'hand-shelf hand-shelf--carousel';
+  shelf.setAttribute('aria-label', 'Your cards — swipe to browse');
+
+  const suggestedRank = opts.suggested?.rank;
+  const total = groups.length;
+  groups.forEach(({ rank, cards }, index) => {
+    const canAsk = opts.playable && opts.askableRanks?.includes(rank);
+    const stack = buildRankCardElement(rank, cards, {
+      shelf: true,
+      handStrip: true,
+      playable: canAsk,
+      filtered: false,
+      suggested: rank === suggestedRank,
+      onAsk: opts.onAsk,
+      onPreview: opts.onPreview,
+    });
+    const lay = handCarouselLayout(index, total);
+    stack.style.setProperty('--stack-w', `${lay.cardW}px`);
+    stack.style.setProperty('--stack-h', `${lay.cardH}px`);
+    stack.style.setProperty('--hand-gap', `${lay.gap}px`);
+    stack.style.zIndex = String(lay.z);
+    if (rank === suggestedRank) stack.dataset.suggested = '1';
+    shelf.appendChild(stack);
+  });
+  shelf.dataset.handCount = String(total);
+
+  wrap.appendChild(shelf);
+
+  if (total > 3) {
+    const hint = document.createElement('p');
+    hint.className = 'hand-scroll-hint';
+    hint.setAttribute('aria-hidden', 'true');
+    hint.textContent = 'Swipe your cards →';
+    wrap.appendChild(hint);
+  }
+
+  return wrap;
+}
+
+export function buildHandByCollections(hand, opts = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'hand-collections-inner hand-stack-layout';
+  const sections = groupHandByCollection(hand, opts.activeCategories);
+  if (!sections.length) {
+    wrap.innerHTML = '<div class="empty-hand">Drawing from the fuck pond…</div>';
+    return wrap;
+  }
+  for (const section of sections) {
+    wrap.appendChild(buildCollectionSection(section, opts));
+  }
+  return wrap;
+}
+
+export function buildActiveCardElement(rank) {
+  const wrap = document.createElement('div');
+  wrap.className = 'active-card-inner';
+  wrap.innerHTML = cardFaceHtml(rank, { large: true });
+  return wrap;
+}
+
+export function animateCardSelect(el, selected) {
+  const dur = motionScale(selected ? DUR.select : DUR.select * 0.85);
+  gsap.to(el, {
+    y: selected ? -14 : 0,
+    scale: selected ? 1.03 : 1,
+    rotate: selected ? (Math.random() > 0.5 ? 1.5 : -1.5) : 0,
+    duration: dur,
+    ease: motionEase(EASE_SETTLE, 'power2.out'),
+    force3D: true,
+    overwrite: 'auto',
+  });
+  if (selected) {
+    CardAudio.flip();
+    haptic('selection');
+  }
+}
+
+export function animateCardToCenter(fromEl, toEl) {
+  if (!fromEl || !toEl) return Promise.resolve();
+  const { ghost, from } = createTransformGhost(fromEl, { className: 'gfy-card-ghost' });
+  CardAudio.flip();
+  return new Promise((resolve) => {
+    const tl = timelineCardTravel(ghost, from, toEl, {
+      liftY: -8,
+      onLand: () => {
+        pulseCardLand(toEl);
+        haptic('light');
+      },
+    });
+    tl.eventCallback('onComplete', () => { ghost.remove(); resolve(); });
+  });
+}
+
+export function animateDeckWiggle() {
+  const deck = document.getElementById('deck-pile-wrap');
+  if (!deck) return;
+  deck.classList.remove('wiggle');
+  void deck.offsetWidth;
+  deck.classList.add('wiggle');
+  CardAudio.flip();
+}
+
+export function animateDrawToHand(deckEl, handEl) {
+  if (!deckEl || !handEl) return;
+  animateDeckWiggle();
+  const from = deckEl.getBoundingClientRect();
+  const cardW = 60;
+  const cardH = 84;
+  const ghost = document.createElement('div');
+  ghost.className = 'gfy-card-ghost draw-ghost';
+  ghost.innerHTML = renderCardBack();
+  ghost.style.cssText = `position:fixed;left:0;top:0;width:${cardW}px;height:${cardH}px;pointer-events:none`;
+  document.body.appendChild(ghost);
+  const startX = from.left + from.width / 2 - cardW / 2;
+  const endY = handEl.getBoundingClientRect().bottom - 90;
+  const endX = handEl.getBoundingClientRect().left + handEl.getBoundingClientRect().width / 2 - cardW / 2;
+  gsap.set(ghost, { x: startX, y: from.top, force3D: true });
+  const tl = gsap.timeline({ onComplete: () => { ghost.remove(); CardAudio.flip(); haptic('light'); } });
+  const tLift = motionScale(0.1);
+  const tTravel = motionScale(0.2);
+  tl.to(ghost, { y: `-=${12}`, rotate: -5, duration: tLift, ease: 'power2.out' }, 0);
+  tl.to(ghost, { x: endX, y: endY, rotate: 10, duration: tTravel, ease: 'power4.in' }, tLift);
+  tl.to(ghost, { rotate: 0, scale: 1.02, duration: motionScale(0.14), ease: motionEase(EASE_SETTLE) }, tLift + tTravel);
+  tl.to(ghost, { opacity: 0, scale: 1, duration: 0.07 }, '-=0.02');
+}
+
+/** Animate ×N count bump when receiving a matching card */
+export function animateHandCountBump(rank, newCount) {
+  const group = document.querySelector(`.card-stack[data-rank="${rank}"], .hand-rank-card[data-rank="${rank}"]`);
+  if (!group) return;
+  CardStackAnimator.receive(group, newCount);
+
+  const blocks = group.querySelectorAll('.set-block');
+  const block = blocks[newCount - 1];
+  if (block && !block.classList.contains('filled')) {
+    block.classList.add('filled', 'set-block--just-filled');
+    setTimeout(() => block.classList.remove('set-block--just-filled'), 700);
+  }
+
+  group.dataset.count = String(newCount);
+  group.classList.toggle('hand-topic-group--almost', newCount === 3);
+  group.classList.toggle('hand-topic-group--complete', newCount >= 4);
+  group.classList.toggle('card-stack--ready', newCount >= 4);
+  group.classList.toggle('hand-rank-card--suggested', newCount >= 3);
+
+  if (newCount > 0) {
+    group.classList.add('collection-progress-pulse');
+    setTimeout(() => group.classList.remove('collection-progress-pulse'), 800);
+  }
+}
+
+export function animateCardLand(el) {
+  pulseCardLand(el);
+}
+
+export function playGameMoment(title, subtitle = '', { variant = 'gfy', ms = 2400 } = {}) {
+  CardAudio.resume();
+  if (variant === 'gfy') {
+    CardAudio.slam();
+    CardAudio.bass();
+  } else {
+    CardAudio.flip();
+  }
+
+  let overlay = document.getElementById('gfy-moment');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'gfy-moment';
+    overlay.className = 'gfy-moment';
+    overlay.innerHTML = `
+      <div class="gfy-moment-inner">
+        <div class="gfy-moment-title"></div>
+        <div class="gfy-moment-sub"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  overlay.className = `gfy-moment gfy-moment--${variant}`;
+  overlay.querySelector('.gfy-moment-title').innerHTML = String(title).replace(/\n/g, '<br>');
+  overlay.querySelector('.gfy-moment-sub').textContent = subtitle;
+  overlay.classList.add('show');
+
+  gsap.fromTo(
+    overlay.querySelector('.gfy-moment-title'),
+    { scale: 1.5, opacity: 0, rotate: variant === 'gfy' ? -3 : 0 },
+    { scale: 1, opacity: 1, rotate: 0, duration: 0.42, ease: 'back.out(1.5)' }
+  );
+
+  if (variant === 'gfy') {
+    gsap.fromTo(
+      '#screen-game .game-table',
+      { x: 0 },
+      {
+        x: '+=6',
+        duration: 0.04,
+        repeat: 4,
+        yoyo: true,
+        ease: 'none',
+        onComplete: () => gsap.set('#screen-game .game-table', { x: 0 }),
+      }
+    );
+    if (navigator.vibrate) navigator.vibrate([30, 50, 30, 50, 80]);
+  } else if (navigator.vibrate) {
+    navigator.vibrate([20, 40, 20]);
+  }
+
+  clearTimeout(playGameMoment._t);
+  playGameMoment._t = setTimeout(() => overlay.classList.remove('show'), ms);
+}
+
+export function playGfyMoment(subtitle = '') {
+  playGameMoment('GO FUCK<br>YOURSELF', subtitle, { variant: 'gfy' });
+}
+
+export { CardAudio, RANKS };

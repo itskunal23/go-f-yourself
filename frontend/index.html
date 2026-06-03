@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="description" content="Go Fish. Drinking. An AI bartender that remembers every bluff — two phones, one room code, zero dignity." />
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
+  <title>GO FUCK YOURSELF 🍻</title>
+
+  <!-- PWA / iOS standalone -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Go Fuck Yourself" />
+  <!-- Split deploy: set to your Render/Railway API origin if this PWA is on a static CDN -->
+  <!-- <meta name="gfy-server" content="https://your-app.onrender.com" /> -->
+  <link rel="apple-touch-icon" href="/assets/app-icon-180.png" sizes="180x180" />
+  <link rel="apple-touch-icon" href="/assets/app-icon-360.png" sizes="360x360" />
+  <link rel="icon" href="/assets/app-icon-180.png" sizes="180x180" type="image/png" />
+  <link rel="icon" href="/assets/app-icon-512.png" sizes="512x512" type="image/png" />
+
+  <!-- Critical: keeps UI usable if external CSS fails (wrong Render URL, CDN 404, cache) -->
+  <style id="gfy-critical">
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    .screen:not(.active), .screen[hidden] { display: none !important; }
+    .screen.hig-screen.active { display: flex !important; flex-direction: column; min-height: 100dvh; }
+    .screen.active:not(.hig-screen):not(.game) { display: block !important; min-height: 100dvh; }
+    .screen.game.active { display: flex !important; flex-direction: column; min-height: 100dvh; background: #0c1510; }
+    .hidden, [hidden], .drawer.hidden, .conn-banner.hidden, .install-hint.hidden { display: none !important; }
+    .drawer:not(.hidden) { display: flex; align-items: flex-end; position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.55); }
+    #app { min-height: 100dvh; }
+    a, button, input, select, textarea { font-family: inherit; }
+  </style>
+  <link rel="canonical" href="https://go-f-yourself.onrender.com/" />
+  <link rel="preload" href="/css/styles.css?v=94" as="style" />
+  <link rel="stylesheet" href="/css/styles.css?v=95" id="css-styles" />
+  <link rel="stylesheet" href="/css/card-stacks.css?v=7" id="css-stacks" />
+  <link rel="stylesheet" href="/css/game-theatre.css?v=12" id="css-theatre" />
+  <link rel="stylesheet" href="/css/gfy-board.css?v=3" id="css-board" />
+  <script>
+    (function () {
+      var h = location.hostname;
+      if (/8ljg/i.test(h) && !sessionStorage.getItem('gfy-host-warn')) {
+        sessionStorage.setItem('gfy-host-warn', '1');
+        location.replace('https://go-f-yourself.onrender.com' + location.pathname + location.search);
+      }
+    })();
+  </script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/vendor/three/three.module.js",
+      "three/addons/": "/vendor/three/addons/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="conn-banner" class="conn-banner hidden" role="status" aria-live="polite"></div>
+
+  <div id="install-hint" class="install-hint hidden" role="region" aria-label="Install app">
+    <div class="install-hint-header">
+      <img class="install-hint-icon" src="/assets/app-icon-180.png" srcset="/assets/app-icon-180.png 1x, /assets/app-icon-360.png 2x" alt="" width="44" height="44" />
+      <div class="install-hint-body">
+        <strong>Install this filthy fucking game</strong>
+        <p>Tap <strong>Share</strong> → <strong>Add to Home Screen</strong> for full-screen, no-browser bullshit.</p>
+      </div>
+      <button type="button" class="install-dismiss" data-dismiss-install aria-label="Dismiss">✕</button>
+    </div>
+    <div class="install-hint-actions">
+      <div class="ios-group">
+        <button type="button" class="ios-row primary-action" data-dismiss-install>
+          <span class="ios-row-label">Got it, I'll fucking install it</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="app">
+
+    <!-- ============ INTRO — Apple HIG landing ============ -->
+    <section id="screen-intro" class="screen hig-screen active">
+      <div class="hig-scroll intro-scroll">
+        <header class="intro-hero hig-title-block">
+          <img class="intro-icon" src="/assets/app-icon-180.png" srcset="/assets/app-icon-180.png 1x, /assets/app-icon-360.png 2x" alt="" width="88" height="88" />
+          <h1 class="large-title logo">GO <span class="f">FUCK</span> YOURSELF</h1>
+          <p class="hig-subhead intro-subhead">Go Fish.<br>Drinking.<br>Tell each other to go fuck yourselves.</p>
+          <ul class="intro-hook-list" aria-label="What you get">
+            <li>Two phones. One room code.</li>
+            <li>AI roasts you personally.</li>
+            <li>Zero dignity. Maximum fuck.</li>
+          </ul>
+          <div class="stack btn-set intro-cta">
+            <button type="button" id="btn-create" class="btn-primary big btn-play">Create a Fucking Room</button>
+            <button type="button" id="btn-join" class="btn-secondary big">Join with a Code</button>
+          </div>
+          <p id="ai-status" class="ios-group-footer ai-status" aria-live="polite">Checking the fucking bartender…</p>
+        </header>
+
+        <section class="intro-demo-section" id="intro-demo-wrap" aria-label="Live demo preview">
+          <div class="demo-card">
+            <div class="demo-chrome">
+              <span class="demo-live" aria-hidden="true"><span class="demo-live-dot"></span> Live Demo</span>
+              <span class="demo-chrome-title">Bhenchod Bartender</span>
+              <span class="demo-badge" aria-hidden="true">Preview</span>
+            </div>
+            <div class="demo-viewport">
+              <div class="intro-showcase cinematic-hero" id="intro-showcase" aria-hidden="true">
+                <div class="cinematic-stage">
+                  <div class="cinematic-bg" aria-hidden="true"></div>
+                  <div class="cinematic-cards-rain" aria-hidden="true"></div>
+                  <span class="demo-watermark" aria-hidden="true">SAMPLE</span>
+
+                  <div class="cinematic-scene cinematic-roast active" data-scene="roast">
+                    <div class="cinematic-bartender">
+                      <span class="cinematic-avatar" aria-hidden="true">🍸</span>
+                      <blockquote class="cinematic-bubble">
+                        <p class="cinematic-roast-text"></p>
+                      </blockquote>
+                    </div>
+                  </div>
+
+                  <div class="cinematic-scene cinematic-player" data-scene="player">
+                    <div class="cinematic-player-bubble">
+                      <span class="cinematic-player-name"></span>
+                      <p class="cinematic-player-text"></p>
+                    </div>
+                  </div>
+
+                  <div class="cinematic-scene cinematic-lie" data-scene="lie">
+                    <p class="cinematic-lie-alert" aria-hidden="true">🚨</p>
+                    <p class="cinematic-lie-title">LIE DETECTED</p>
+                    <p class="cinematic-lie-penalty">+2 Drinks</p>
+                  </div>
+
+                  <div class="cinematic-scene cinematic-finale" data-scene="finale">
+                    <div class="cinematic-bartender cinematic-bartender--finale">
+                      <span class="cinematic-avatar" aria-hidden="true">🍸</span>
+                      <blockquote class="cinematic-bubble cinematic-bubble--finale">
+                        <p class="cinematic-finale-text">Nandini has drawn 18 cards.<br>At this point she's not playing.<br>She's collecting disappointment.</p>
+                      </blockquote>
+                    </div>
+                  </div>
+                </div>
+                <div class="demo-progress" aria-hidden="true">
+                  <div class="demo-progress-fill" id="demo-progress-fill"></div>
+                </div>
+              </div>
+            </div>
+            <div class="demo-footer">
+              <p class="demo-caption">The bartender watches every answer — sample room</p>
+              <button type="button" id="btn-demo" class="btn-text demo-replay">↻ Replay</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="ios-group-wrap" aria-label="How it works">
+          <h2 class="ios-group-header">How It Works</h2>
+          <ul class="ios-inset-list">
+            <li class="ios-row-static"><span class="ios-row-label">Ask for cards. Say fuck a lot.</span></li>
+            <li class="ios-row-static"><span class="ios-row-label">Collect sets. Go fuck yourself when they don't have it.</span></li>
+            <li class="ios-row-static"><span class="ios-row-label">Bluff if you're a lying fuck.</span></li>
+            <li class="ios-row-static"><span class="ios-row-label">Get caught if you're a stupid fuck.</span></li>
+          </ul>
+        </section>
+
+        <footer class="intro-foot">
+          <p class="ios-group-footer warn"><strong>21+ only.</strong> Comedy party game — not medical advice. Drink responsibly.</p>
+        </footer>
+      </div>
+    </section>
+
+    <!-- ============ ONBOARDING — fast wizard ============ -->
+    <section id="screen-profile" class="screen hig-screen onboard-screen" hidden>
+      <div class="onboard-shell">
+        <nav class="hig-nav-bar onboard-nav">
+          <button type="button" class="back-btn" id="onboard-back">‹ Back</button>
+        </nav>
+        <header class="hig-title-block onboard-header">
+          <h1 class="large-title" id="onboard-title">Create Room</h1>
+          <p class="hig-subhead" id="onboard-sub">How wild should tonight be?</p>
+        </header>
+
+        <div class="onboard-step active" data-step="intensity">
+          <div id="onboard-intensity"></div>
+        </div>
+
+        <div class="onboard-step" data-step="deck">
+          <p class="onboard-deck-hint">Pick one category for your first round — you can switch after each game.</p>
+          <div class="deck-check-list" id="onboard-deck-list"></div>
+          <p class="onboard-deck-preview" id="onboard-deck-preview">13 situations · 52 cards</p>
+        </div>
+
+        <div class="onboard-step" data-step="about">
+          <ul class="ios-inset-list onboard-about-list">
+            <li class="ios-row-field">
+              <label class="ios-field-label" for="onboard-name">Display Name</label>
+              <input id="onboard-name" class="ios-field-input" placeholder="Required" autocomplete="nickname" />
+            </li>
+          </ul>
+          <h2 class="ios-group-header ios-group-header--sub">Your Role Tonight</h2>
+          <p class="onboard-role-hint" id="onboard-role-hint">Kunal doms. Nandini submits. Pick yours.</p>
+          <div class="role-grid" id="onboard-role" role="radiogroup" aria-label="Dom or sub"></div>
+          <h2 class="ios-group-header ios-group-header--sub">Age Range</h2>
+          <div class="age-range-grid" id="onboard-age-ranges" role="radiogroup" aria-label="Age range"></div>
+        </div>
+
+        <div class="onboard-step" data-step="join-code">
+          <div class="ios-code-wrap ios-row-field onboard-code-wrap">
+            <div class="ios-code-boxes" id="onboard-join-boxes" aria-hidden="true">
+              <span class="code-cell"></span><span class="code-cell"></span><span class="code-cell"></span><span class="code-cell"></span>
+            </div>
+            <input id="onboard-join-code" inputmode="latin" autocapitalize="characters" maxlength="4" class="code-input" autocomplete="off" aria-label="Room code" />
+          </div>
+        </div>
+
+        <div class="onboard-step" data-step="roast">
+          <div class="roast-progress-block" aria-live="polite">
+            <p class="roast-progress-text" id="roast-progress-text">Bartender Learning About You · 0%</p>
+            <div class="roast-progress-track"><div class="roast-progress-fill" id="roast-progress-fill" style="width:0%"></div></div>
+          </div>
+          <div id="roast-card-mount" class="roast-card-mount"></div>
+        </div>
+
+        <div class="onboard-step" data-step="complete">
+          <div id="onboard-complete"></div>
+        </div>
+      </div>
+
+      <div class="hig-bottom-bar onboard-footer">
+        <button type="button" id="btn-onboard-next" class="btn-primary big btn-play" disabled><span>Keep Fucking Going →</span></button>
+        <button type="button" id="btn-roast-skip" class="btn-text hidden">Skip</button>
+        <p class="ios-group-footer onboard-privacy">Answers only visible to the AI bartender.</p>
+      </div>
+    </section>
+
+    <!-- ============ LOBBY — Apple HIG waiting room ============ -->
+    <section id="screen-lobby" class="screen hig-screen" hidden>
+      <div class="hig-scroll lobby-inner">
+        <nav class="hig-nav-bar lobby-head">
+          <button type="button" class="back-btn" id="btn-lobby-home">‹ Main</button>
+        </nav>
+        <header class="hig-title-block">
+          <h1 class="large-title">Fuck Room</h1>
+          <p class="hig-subhead">Share the code. Wait to go fuck yourselves.</p>
+        </header>
+
+        <section class="ios-group-wrap lobby-games hidden" id="lobby-games-wrap">
+          <h2 class="ios-group-header">Side Games</h2>
+          <div id="lobby-games" class="lobby-games-row"></div>
+        </section>
+
+        <section class="ios-group-wrap" id="lobby-categories-wrap">
+          <h2 class="ios-group-header">Deck Categories</h2>
+          <p class="ios-group-footer ios-group-footer--top" id="lobby-cat-hint">Host picks categories — both phones see the same deck.</p>
+          <ul class="ios-inset-list ios-multi-select" id="lobby-categories" aria-label="Deck categories"></ul>
+          <div id="lobby-deck-preview" class="deck-preview" aria-live="polite"></div>
+        </section>
+
+        <section class="ios-group-wrap">
+          <h2 class="ios-group-header">Room Code</h2>
+          <div class="ios-inset-list lobby-code-inset">
+            <div id="lobby-code" class="lobby-code" aria-label="Room code">
+              <span class="code-cell"></span><span class="code-cell"></span><span class="code-cell"></span><span class="code-cell"></span>
+            </div>
+          </div>
+          <button type="button" id="btn-copy-code" class="btn-text lobby-copy">Copy Code</button>
+        </section>
+
+        <section class="ios-group-wrap">
+          <h2 class="ios-group-header">Players</h2>
+          <ul class="ios-inset-list players-strip" id="lobby-players"></ul>
+        </section>
+
+        <p id="lobby-status" class="ios-group-footer lobby-status">Waiting for your fucking partner…</p>
+        <div id="lobby-host" class="host-bubble inline lobby-host hidden" aria-live="polite"></div>
+      </div>
+
+      <div class="hig-bottom-bar bottom-bar">
+        <button type="button" id="btn-start" class="btn-primary big btn-play btn-start-gfy">Start Game</button>
+        <button type="button" id="btn-leave-lobby" class="btn-text destructive-text">Fuck this — leave</button>
+      </div>
+    </section>
+
+    <!-- ============ GAME — card table first ============ -->
+    <section id="screen-game" class="screen game" hidden>
+      <header class="game-top game-top-minimal">
+        <button type="button" class="back-btn game-back" id="btn-game-home" aria-label="Leave table">‹ Leave</button>
+        <span class="turn-pill" id="turn-pill" role="status" aria-live="polite">—</span>
+        <span class="chip chip-dim" id="room-chip" hidden aria-hidden="true">····</span>
+      </header>
+
+      <div id="player-status-bar" class="player-status-bar hidden" aria-label="Player status">
+        <span id="house-rule-chip" class="house-rule-chip hidden"></span>
+        <div id="player-status-meters" class="player-status-meters"></div>
+        <div id="drink-token-actions" class="drink-token-actions hidden"></div>
+      </div>
+
+      <div id="card-cat-legend" class="card-cat-legend card-cat-legend--collapsed hidden" aria-label="Card categories"></div>
+
+      <div class="game-table">
+        <div id="game-scoreboard" class="game-scoreboard hidden" aria-label="Scores"></div>
+        <div id="opponent-avatar-stage" class="opponent-avatar-stage" aria-live="polite">
+          <div id="opponent-avatar-hand" class="opponent-avatar-hand" aria-label="Opponent hand"></div>
+          <span class="opponent-avatar-name" id="opponent-avatar-name"></span>
+        </div>
+        <div id="opponent-zone" class="opponent-zone opponent-zone--hidden" aria-live="polite" aria-hidden="true">
+          <div id="opponent-bar" class="opponent-bar"></div>
+          <div id="opponent-hand-visual" class="opponent-hand-visual"></div>
+        </div>
+
+        <div id="defender-popup" class="defender-popup hidden" aria-live="assertive"></div>
+
+        <div class="table-center play-zone" data-layer="play">
+          <div id="game-prompt" class="game-prompt hidden" aria-live="polite"></div>
+          <div class="play-zone-stage">
+            <div class="play-zone-glow" aria-hidden="true"></div>
+            <div class="table-hero">
+              <div id="active-card" class="active-card-mount card-hero empty"></div>
+            </div>
+          </div>
+          <div class="deck-pile-wrap deck-under-hero" id="deck-pile-wrap" aria-label="Draw pile">
+            <div class="deck-stack" id="deck-stack"></div>
+            <span class="deck-count-label"><span id="deck-count">0</span></span>
+          </div>
+        </div>
+
+        <div id="target-pick" class="turn-panel hidden">
+          <div id="target-list" class="target-list"></div>
+        </div>
+
+        <div id="rank-pick" class="turn-panel hidden">
+          <div id="rank-list" class="rank-list"></div>
+        </div>
+
+        <div class="sets-compact sets-done-strip" id="sets-compact">
+          <h2 class="sets-done-label">Sets</h2>
+          <div class="books-row" id="books-row" aria-label="Completed sets"></div>
+        </div>
+
+        <div class="game-ask-strip" id="game-ask-strip">
+          <div id="hand-ask-next" class="hand-ask-next hidden" aria-live="polite"></div>
+          <button type="button" id="play-primary" class="play-primary hidden" aria-live="polite">Ask</button>
+        </div>
+
+        <div class="hand-zone" id="hand-wrap">
+          <div id="hand" class="hand hand-shelf-mount"></div>
+        </div>
+      </div>
+
+      <div id="set-completion-mount" class="set-completion-mount hidden" aria-live="assertive"></div>
+
+      <div id="game-toast" class="game-toast hidden" aria-live="polite"></div>
+      <div id="reaction-layer" class="reaction-layer" aria-hidden="true"></div>
+
+      <div id="host-whisper" class="bartender-pop host-whisper hidden host-whisper--collapsed" aria-live="polite">
+        <article class="bartender-pop__card">
+          <header class="bartender-pop__head">
+            <span class="bartender-avatar" aria-hidden="true">🍸</span>
+            <span class="bartender-label">Dealer</span>
+            <button type="button" class="bartender-toggle" id="btn-bartender-toggle" aria-expanded="false" aria-controls="host-expanded" aria-label="Expand AI bartender commentary">Expand</button>
+          </header>
+          <p class="bartender-teaser" id="host-teaser"></p>
+          <div class="bartender-expanded hidden" id="host-expanded" aria-hidden="true">
+            <p id="host-text" class="host-text"></p>
+            <span id="host-loading" class="host-loading hidden">Thinking…</span>
+          </div>
+        </article>
+      </div>
+
+      <div class="action-bar action-bar-minimal">
+        <button type="button" class="fab-more" id="btn-more" aria-label="More actions" aria-haspopup="dialog">⋯</button>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ============ STATS SHEET (drinks, BAC, meters) ============ -->
+  <div id="meters-drawer" class="drawer hidden">
+    <div class="drawer-sheet">
+      <div class="drawer-grab"></div>
+      <h3>Stats</h3>
+      <div id="meters"></div>
+      <button type="button" class="btn-secondary btn-cancel" id="btn-meters-close">Close</button>
+    </div>
+  </div>
+
+  <!-- ============ GAME ACTIONS SHEET ============ -->
+  <div id="game-actions-sheet" class="drawer hidden" role="dialog" aria-label="Game actions">
+    <div class="drawer-sheet game-actions-panel">
+      <div class="drawer-grab"></div>
+      <ul class="game-actions-list">
+        <li><button type="button" class="game-action-row" id="ga-rules">How to Play</button></li>
+        <li><button type="button" class="game-action-row" id="ga-stats">Stats</button></li>
+        <li><button type="button" class="game-action-row" id="ga-drink-log">Drink Log</button></li>
+        <li><button type="button" class="game-action-row" data-host="roast">Roast</button></li>
+        <li><button type="button" class="game-action-row" data-host="dare">Dare</button></li>
+        <li><button type="button" class="game-action-row" id="ga-side-games">Side Games</button></li>
+      </ul>
+      <button type="button" class="btn-secondary btn-cancel" id="btn-actions-close">Close</button>
+    </div>
+  </div>
+
+  <!-- ============ MODALS / SHEETS ============ -->
+  <div id="modal-root"></div>
+
+  <script type="module" src="/js/app.js?v=96"></script>
+</body>
+</html>

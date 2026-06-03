@@ -1,0 +1,63 @@
+/* GFY play-surface tweaks only — layout stays in game-theatre.css */
+
+#screen-game .player-status-bar,
+#screen-game .game-scoreboard,
+#screen-game .card-cat-legend {
+  display: none !important;
+}
+
+/* In-play card: table preview only (never full hand-card size on the felt) */
+#screen-game .table-center .active-card-mount:not(.empty) {
+  width: min(100px, 28vw);
+  height: min(138px, 38vw);
+}
+
+#screen-game .table-center .active-card-mount:not(.empty) .gfy-oneliner {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+#screen-game .game-toast {
+  top: calc(52px + env(safe-area-inset-top, 0px));
+  bottom: auto;
+  left: 12px;
+  right: 12px;
+  max-width: none;
+  z-index: 45;
+  pointer-events: none;
+}
+
+body.bluff-dim::before,
+body.bluff-heartbeat::after {
+  display: none !important;
+}
+
+.chaos-bottle-overlay.cb-compact .cb-dim {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.chaos-bottle-overlay.cb-compact .cb-stage {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 72dvh;
+  border-radius: 20px 20px 0 0;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  background: var(--game-surface, #171717);
+  transform: none;
+}
+
+.debt-choice-btn#dc-double {
+  background: linear-gradient(135deg, #5c3d8a 0%, #3d2860 100%);
+  border-color: rgba(180, 140, 255, 0.35);
+  color: #fff;
+}
+
+.debt-choice-btn#dc-double strong {
+  color: #e8d4ff;
+}
