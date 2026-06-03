@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: go-f-yourself
+    runtime: node
+    rootDir: game
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: HOST_MODEL
+        value: meta/llama-3.3-70b-instruct
+      - key: VISION_MODEL
+        value: meta/llama-3.2-90b-vision-instruct

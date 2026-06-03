@@ -1,0 +1,12 @@
+{
+  "name": "go-f-yourself",
+  "private": true,
+  "description": "Deploy entrypoint — the Node server and dependencies live in game/",
+  "scripts": {
+    "postinstall": "npm install --prefix game",
+    "start": "npm start --prefix game"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
