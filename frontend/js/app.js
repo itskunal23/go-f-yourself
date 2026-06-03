@@ -35,7 +35,6 @@ import {
   primaryActionSignature,
 } from './render/table-diff.js?v=1';
 import { escapeHtml } from './dom-utils.js';
-import { inferPlayRole } from './questionnaire.js';
 import {
   CardStackModel,
   CardStackAnimator,
@@ -50,7 +49,7 @@ import { animateAskIntent } from './ask-theatre.js?v=1';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
-import { initOnboarding, openOnboarding, getOnboardingState, presetOnboardingName, ONBOARD_RECOMMENDED, retryOnboardingLaunch, clearLaunchTimer } from './onboarding.js?v=72';
+import { initOnboarding, openOnboarding, getOnboardingState, ONBOARD_RECOMMENDED, retryOnboardingLaunch, clearLaunchTimer } from './onboarding.js?v=72';
 import { renderDrinkEconomyHud, syncDrinkChoiceSheet, resetDrinkEconomyUi, openGiftSheet } from './drink-economy-ui.js?v=73';
 import { renderDrinkingBars, pulseDrinkingBar } from './drinking-bar.js?v=1';
 import { mountDrinkScanner } from './drink-scanner.js?v=1';
@@ -397,50 +396,22 @@ function initIntroDemo() {
   });
 }
 
-function introName() {
-  return ($('#intro-name')?.value || '').trim();
-}
-
-function buildQuickProfile(name) {
-  const playRole = inferPlayRole(name) || 'dom';
-  return {
-    name,
-    sex: playRole === 'sub' ? 'female' : 'male',
-    playRole,
-    age: 30,
-    heightCm: 170,
-    weightKg: 70,
-    questionnaire: {},
-  };
-}
-
 function quickLaunchCreate() {
-  const name = introName();
-  if (name.length < 2) {
-    toast('Enter your name.');
-    $('#intro-name')?.focus();
-    return;
-  }
   S.mode = 'create';
   S.gameMode = 'drinking';
   S.cardCategories = [...ONBOARD_RECOMMENDED];
-  const profile = buildQuickProfile(name);
   S.socket.clearSession();
-  S.socket.send({ t: 'create', profile, gameMode: S.gameMode, cardCategories: S.cardCategories });
+  openOnboarding('create');
+  goto('profile');
   haptic('medium');
 }
 
 function quickLaunchJoin() {
-  const name = introName();
-  if (name.length < 2) {
-    toast('Enter your name.');
-    $('#intro-name')?.focus();
-    return;
-  }
   S.mode = 'join';
-  presetOnboardingName(name);
+  S.socket.clearSession();
   openOnboarding('join');
   goto('profile');
+  haptic('medium');
 }
 
 function wireUI() {
