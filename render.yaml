@@ -1,8 +1,9 @@
+# Render Blueprint — builds from repository root (matches default GitHub-connected services).
+# Dashboard equivalent: Root Directory empty, Build `npm install`, Start `npm start`.
 services:
   - type: web
     name: go-f-yourself
     runtime: node
-    rootDir: game
     plan: free
     buildCommand: npm install
     startCommand: npm start

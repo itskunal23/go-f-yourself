@@ -11,7 +11,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 attachRooms(wss, { getHostLine });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  🍻  GO FUCK YOURSELF running at http://localhost:${PORT}`);
   console.log(`      Multiplayer: two phones, one room code. WebSocket on /ws.`);
   console.log(`      AI host: ${hasKey ? 'ENABLED' : 'OFFLINE fallback (no NVIDIA_API_KEY)'}\n`);

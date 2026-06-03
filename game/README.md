@@ -176,10 +176,10 @@ Obtain a key at [build.nvidia.com](https://build.nvidia.com) (developer tier; ra
 
 ### Recommended: Render (full stack)
 
-WebSocket and in-memory rooms require a long-running Node process. The repo root includes `render.yaml` (`rootDir: game`) and a root `package.json` so Render can build from the repository root.
+WebSocket and in-memory rooms require a long-running Node process. Use the **repository root** `render.yaml` and `package.json` on [Render](https://render.com).
 
 1. Connect the GitHub repository.
-2. **New → Blueprint** (uses root `render.yaml`), or Web Service with **Root Directory** = `game` (build `npm install`, start `npm start`). If the service root is the repo root, leave Root Directory empty — root `package.json` runs `npm install` in `game/`.
+2. **New → Blueprint**, or Web Service: **Root Directory** empty, **Build** `npm install`, **Start** `npm start` (root `postinstall` installs `game/` dependencies). Or set **Root Directory** = `game` with the same build/start commands.
 3. Set `NVIDIA_API_KEY` in environment variables (Dashboard → Environment).
 4. Confirm health: `https://go-f-yourself.onrender.com/api/health`
 5. On each phone: open **https://go-f-yourself.onrender.com** → **Share → Add to Home Screen**.
