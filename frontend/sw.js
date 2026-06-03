@@ -1,75 +1,58 @@
-// Service worker for the "Go Fuck Yourself" PWA.
-// Strategy: precache the app shell, serve static assets cache-first, and
-// always go to the network for the live game (the /ws WebSocket and /api/*
-// are never cached so multiplayer stays real-time).
-
-const CACHE = 'gfy-v34';
+const CACHE = 'gfy-v98';
 const SHELL = [
   '/',
   '/index.html',
-  '/css/styles.css',
-  '/js/app.js',
-  '/js/api.js',
-  '/js/mobile.js',
-  '/js/cards.js',
-  '/js/game.js',
-  '/js/bac.js',
+  '/css/styles.css?v=98',
+  '/css/game-theatre.css?v=15',
+  '/css/card-stacks.css?v=9',
+  '/js/app.js?v=98',
+  '/js/motion.js',
+  '/js/dom-utils.js',
+  '/js/physics/card-motion.js',
+  '/js/interactions/hand-focus.js',
+  '/js/render/hand-render.js',
+  '/js/render/table-diff.js',
   '/manifest.webmanifest',
-  '/assets/app-icon.png',
+  '/assets/app-icon-180.png',
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())
-  );
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim()),
   );
 });
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
-
   const url = new URL(request.url);
-
-  // Never cache the API or websocket upgrade — multiplayer must be live.
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws')) return;
 
-  // JS modules: network-first so game code updates without stale SW lock-in.
-  if (url.pathname.startsWith('/js/') || url.pathname.startsWith('/vendor/')) {
+  if (url.pathname.startsWith('/js/') || url.pathname.startsWith('/vendor/') || url.pathname.startsWith('/css/')) {
     event.respondWith(
       fetch(request)
         .then((res) => {
-          if (res && res.status === 200 && url.origin === self.location.origin) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(request, copy));
+          if (res?.status === 200 && url.origin === self.location.origin) {
+            caches.open(CACHE).then((c) => c.put(request, res.clone()));
           }
           return res;
         })
-        .catch(() => caches.match(request))
+        .catch(() => caches.match(request)),
     );
     return;
   }
 
-  // App shell / static: cache-first, fall back to network and update cache.
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const fetchPromise = fetch(request)
-        .then((res) => {
-          if (res && res.status === 200 && url.origin === self.location.origin) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(request, copy));
-          }
-          return res;
-        })
-        .catch(() => cached || caches.match('/index.html'));
-      return cached || fetchPromise;
-    })
+    caches.match(request).then((cached) => cached || fetch(request).then((res) => {
+      if (res?.status === 200 && url.origin === self.location.origin) {
+        caches.open(CACHE).then((c) => c.put(request, res.clone()));
+      }
+      return res;
+    })),
   );
 });

@@ -1,11 +1,12 @@
 /**
  * iPhone drag-to-ask — lift centered hand stack, drag to opponent, release to ask.
- * Horizontal pans stay on the carousel (pointer threshold + capture only while dragging).
+ * Optional advanced drag on focused card (arc hand — tap+Ask is primary).
  */
 import gsap from '/vendor/gsap/index.js';
 import { haptic } from './mobile.js';
-import { nearestSnapChild } from './touch-ui.js?v=2';
-import { createTransformGhost, motionEase, DUR, EASE_SETTLE } from './motion.js?v=1';
+import { createTransformGhost, motionEase, motionDuration, DUR, EASE_SETTLE } from './motion.js?v=1';
+import { getFocusedRank } from './interactions/hand-focus.js';
+import { VelocityTracker, dragTilt, springGhostToRect } from './physics/card-motion.js';
 import { GameAudio } from './game-audio.js?v=64';
 
 const DRAG_START_PX = 10;
@@ -14,6 +15,7 @@ const TAP_MAX_MOVE = 14;
 const TAP_MAX_MS = 320;
 
 let getContext = () => ({});
+const velocity = new VelocityTracker();
 
 function dropTargets() {
   return [
@@ -43,12 +45,6 @@ function updateDropHighlight(clientX, clientY) {
   hit?.classList.add('gfy-drop-zone--hot');
 }
 
-function centeredAskStack(scroller, stack) {
-  if (!scroller || !stack) return false;
-  const hit = nearestSnapChild(scroller, '.card-stack[data-drag-ask]');
-  return hit === stack;
-}
-
 function positionGhost(ghost, clientX, clientY, offsetX, offsetY) {
   const w = ghost.offsetWidth;
   const h = ghost.offsetHeight;
@@ -63,23 +59,13 @@ function springGhostHome(drag) {
   const { ghost, stack } = drag;
   if (!ghost) return Promise.resolve();
   const rect = stack.getBoundingClientRect();
-  return new Promise((resolve) => {
-    gsap.to(ghost, {
-      x: rect.left,
-      y: rect.top,
-      rotate: 0,
-      scale: 1,
-      duration: motionEase(DUR.snapTravel),
-      ease: motionEase('back.out(1.2)'),
-      onComplete: () => {
-        ghost.remove();
-        resolve();
-      },
-    });
+  const v = velocity.velocity();
+  return springGhostToRect(ghost, rect, { velocity: v, rotate: 0, scale: 1 }).then(() => {
+    ghost.remove();
     gsap.to(stack, {
       scale: 1,
       opacity: 1,
-      duration: motionEase(DUR.snapSettle),
+      duration: motionDuration(DUR.snapSettle),
       ease: motionEase(EASE_SETTLE),
     });
   });
@@ -96,7 +82,7 @@ function springGhostToTarget(drag, targetEl) {
       y: to.top + (to.height - fh) / 2,
       scale: to.width / fw,
       rotate: -6,
-      duration: motionEase(0.28),
+      duration: motionDuration(0.28),
       ease: motionEase('power2.in'),
       onComplete: () => {
         ghost.remove();
@@ -158,11 +144,14 @@ export function initHandDragAsk(contextFn) {
     const ctx = getContext();
     if (!ctx.playable || ctx.blocked || ctx.askInFlight) return;
 
-    const scroller = stack.closest('.hand-shelf-scroller--carousel');
+    const scroller = stack.closest('.hand-shelf-scroller');
     if (!scroller) return;
 
-    if (!centeredAskStack(scroller, stack)) return;
+    const focus = getFocusedRank();
+    if (focus && focus !== stack.dataset.rank) return;
 
+    velocity.reset();
+    velocity.sample(e.clientX, e.clientY);
     drag = {
       stack,
       rank: stack.dataset.rank,
@@ -197,8 +186,9 @@ export function initHandDragAsk(contextFn) {
 
     if (drag.mode === 'drag' && drag.ghost) {
       e.preventDefault();
+      velocity.sample(e.clientX, e.clientY);
       positionGhost(drag.ghost, e.clientX, e.clientY, drag.offsetX, drag.offsetY);
-      gsap.set(drag.ghost, { rotate: dx * 0.05, force3D: true });
+      gsap.set(drag.ghost, { rotate: dragTilt(dx), force3D: true });
       updateDropHighlight(e.clientX, e.clientY);
     }
   }
@@ -213,7 +203,6 @@ export function initHandDragAsk(contextFn) {
 
     if (snap.mode === 'pending' && moved < TAP_MAX_MOVE && elapsed < TAP_MAX_MS) {
       cleanup();
-      if (ctx.onAsk) ctx.onAsk(snap.rank, snap.stack);
       return;
     }
 

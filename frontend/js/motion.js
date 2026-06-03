@@ -41,6 +41,22 @@ export function motionEase(ease, reduced = 'power1.out') {
   return prefersReducedMotion() ? reduced : ease;
 }
 
+/** Duration in seconds — never pass ease strings here. */
+export function motionDuration(sec, reducedFactor = 0.35) {
+  return prefersReducedMotion() ? sec * reducedFactor : sec;
+}
+
+/** Listen once for reduced-motion changes (a11y). */
+export function watchReducedMotion(onChange) {
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const fn = () => {
+    reducedMotion = mq.matches;
+    onChange?.(mq.matches);
+  };
+  mq.addEventListener?.('change', fn);
+  return () => mq.removeEventListener?.('change', fn);
+}
+
 /** Fixed ghost positioned with transform (smoother on iOS Safari) */
 export function createTransformGhost(sourceEl, {
   className = 'gfy-card-ghost',

@@ -66,7 +66,9 @@ Full Sequences:          1000-2000ms (pre-game shuffle/deal)
 
 ## Motion Systems Catalog
 
-### 1. Card Physics System
+### 1. Card Physics System (production: arc fan + GSAP)
+Production hand uses **arc fan layout** (`buildHandArc` in `frontend/js/cards.js`), tap-to-focus + Ask CTA, optional vertical drag-to-ask on the focused stack. Continuous mass/velocity simulation remains optional for future passes.
+
 Simulates physical properties of premium playing cards.
 
 #### Properties

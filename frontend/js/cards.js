@@ -1,14 +1,13 @@
 import gsap from '/vendor/gsap/index.js';
 import { RANKS, rankMeta, categoryMeta } from './game.js?v=63';
-import { sanitizeCategories, DEFAULT_CATEGORIES } from './card-categories.js';
 import { GameAudio as CardAudio } from './game-audio.js?v=63';
 import { haptic } from './mobile.js';
-import { isTouchDevice, wireTap } from './touch-ui.js?v=2';
+import { wireTap } from './touch-ui.js?v=3';
+import { bindHandStackFocus } from './interactions/hand-focus.js';
 import {
   CardStackModel,
   buildCardStackView,
   CardStackAnimator,
-  bindStackDeck,
   refreshStackDeckIndices,
 } from './card-stacks.js?v=4';
 import {
@@ -292,129 +291,8 @@ export function fanLayout(index, total) {
   return { rot, arc, overlap, z: index + 1 };
 }
 
-/** Hand carousel — fixed readable cards, horizontal scroll, no fan rotation */
 export const HAND_CARD_W = 108;
 export const HAND_CARD_H = 132;
-export const HAND_CARD_GAP = 12;
-
-export function handCarouselLayout(index, total) {
-  return {
-    rot: 0,
-    arc: 0,
-    overlap: 0,
-    gap: HAND_CARD_GAP,
-    cardW: HAND_CARD_W,
-    cardH: HAND_CARD_H,
-    z: index + 1,
-    total,
-  };
-}
-
-/** @deprecated Use handCarouselLayout */
-export function fanHandLayout(index, total, viewportW = 390) {
-  return handCarouselLayout(index, total);
-}
-
-export function buildCardElement(card, opts = {}) {
-  const total = opts.total || 1;
-  const i = opts.index || 0;
-  const layoutFn = opts.grouped ? stackLayout : fanLayout;
-  const { rot, arc, overlap, stackY = 0, z } = layoutFn(i, total);
-  const lift = opts.selected ? -22 : (opts.playable ? -8 : 0);
-
-  const el = document.createElement('div');
-  el.className = 'gfy-card-slot'
-    + (opts.grouped ? ' gfy-card-slot--stacked' : '')
-    + (opts.selected ? ' selected' : '')
-    + (opts.playable ? ' playable' : '');
-  el.dataset.rank = card.rank || '';
-  el.style.setProperty('--fan-rot', `${rot}deg`);
-  el.style.setProperty('--fan-arc', `${arc}px`);
-  el.style.setProperty('--fan-lift', `${lift}px`);
-  el.style.setProperty('--fan-overlap', `${overlap}px`);
-  el.style.setProperty('--fan-z', z);
-  if (opts.grouped) el.style.setProperty('--stack-y', `${stackY}px`);
-  el.innerHTML = cardFaceHtml(card.rank);
-
-  if (opts.playable && !isTouchDevice) {
-    el.setAttribute('role', 'button');
-    el.setAttribute('aria-label', `Ask for ${rankMeta(card.rank).line || card.rank}`);
-    el.addEventListener('pointerenter', () => {
-      gsap.to(el, { y: opts.grouped ? -14 : -20, scale: 1.06, rotate: 0, duration: 0.25, ease: 'back.out(1.4)' });
-    });
-    el.addEventListener('pointerleave', () => {
-      gsap.to(el, { y: 0, scale: opts.selected ? 1.04 : 1, rotate: rot, duration: 0.3, ease: 'power2.out' });
-    });
-  } else if (opts.playable) {
-    el.setAttribute('role', 'button');
-    el.setAttribute('aria-label', `Ask for ${rankMeta(card.rank).line || card.rank}`);
-  }
-
-  return el;
-}
-
-export function buildHandGroupElement(rank, cards, opts = {}) {
-  return buildRankCardElement(rank, cards, opts);
-}
-
-function buildVisualStackHtml(count) {
-  if (count <= 0) return '';
-  const layers = Math.min(count, 3);
-  let html = '<div class="hand-visual-stack" aria-hidden="true">';
-  for (let i = layers - 1; i >= 0; i--) {
-    html += `<span class="hand-visual-stack-layer" style="--stack-i:${i}"></span>`;
-  }
-  html += '</div>';
-  if (count > 1) {
-    html += `<span class="hand-stack-count" aria-label="${count} cards">${count}</span>`;
-  }
-  return html;
-}
-
-function collectionTier(maxCount) {
-  if (maxCount >= 4) return 'complete';
-  if (maxCount >= 3) return 'hot';
-  if (maxCount >= 2) return 'warm';
-  return 'cold';
-}
-
-function collectionChaseLine(maxCount, bestRank) {
-  if (maxCount >= 4) return 'Create your set now';
-  if (maxCount === 3) return `One card away — chase ${bestRank ? rankMeta(bestRank).line.slice(0, 28) : 'this set'}`;
-  if (maxCount === 2) return 'Mid progress — keep building';
-  return 'Early collection — ask wide';
-}
-
-export function groupHandByCollection(hand, activeCategories = DEFAULT_CATEGORIES) {
-  const byCat = new Map();
-  for (const catId of sanitizeCategories(activeCategories)) {
-    byCat.set(catId, []);
-  }
-  const rankMap = new Map();
-  for (const c of hand) {
-    if (!c.rank) continue;
-    if (!rankMap.has(c.rank)) rankMap.set(c.rank, []);
-    rankMap.get(c.rank).push(c);
-  }
-  for (const [rank, cards] of rankMap) {
-    const cat = cards[0]?.category || rankMeta(rank).category;
-    if (!byCat.has(cat)) byCat.set(cat, []);
-    byCat.get(cat).push({ rank, cards, count: cards.length });
-  }
-  for (const ranks of byCat.values()) {
-    ranks.sort((a, b) => b.count - a.count);
-  }
-  const sections = [];
-  for (const [catId, ranks] of byCat) {
-    if (!ranks.length) continue;
-    const maxCount = Math.max(...ranks.map((r) => r.count));
-    const best = ranks.find((r) => r.count === maxCount) || ranks[0];
-    const priority = maxCount >= 4 ? 1000 : maxCount === 3 ? 900 : maxCount === 2 ? 500 : 100;
-    sections.push({ catId, ranks, maxCount, bestRank: best.rank, priority, tier: collectionTier(maxCount) });
-  }
-  sections.sort((a, b) => b.priority - a.priority || b.maxCount - a.maxCount);
-  return sections;
-}
 
 export function computeSuggestedAsk(hand, askableRanks = []) {
   if (!askableRanks?.length) return null;
@@ -442,13 +320,6 @@ export function computeSuggestedAsk(hand, askableRanks = []) {
   return best;
 }
 
-export function computeBestCollection(collections) {
-  if (!collections?.length) return null;
-  const top = collections[0];
-  const cat = categoryMeta(top.catId);
-  return { catId: top.catId, cat, maxCount: top.maxCount, tier: top.tier };
-}
-
 function stackArtHtmlForRank(rank) {
   const meta = rankMeta(rank);
   const art = CARD_ART[meta.art] || CARD_ART.default;
@@ -467,71 +338,28 @@ function buildRankCardElement(rank, cards, opts = {}) {
     artHtml: shelf && !handStrip ? stackArtHtmlForRank(rank) : undefined,
   });
 
-  const activate = (e) => {
-    e?.stopPropagation?.();
-    if (opts.onPreview) {
-      opts.onPreview(cards[cards.length - 1], el);
-      return;
-    }
-    if (opts.playable && !opts.filtered) opts.onAsk?.(rank, el);
-  };
-
-  if (opts.playable && !opts.filtered && opts.onAsk) {
+  if (opts.playable && !opts.filtered) {
     el.dataset.dragAsk = '1';
+    bindHandStackFocus(el, rank, {
+      playable: true,
+      onPreview: opts.onPreview
+        ? () => opts.onPreview(cards[cards.length - 1], el)
+        : null,
+    });
   } else {
-    wireTap(el, activate);
+    wireTap(el, (e) => {
+      e?.stopPropagation?.();
+      if (opts.onPreview) opts.onPreview(cards[cards.length - 1], el);
+    });
   }
 
   return el;
 }
 
-function buildCollectionSection(section, opts = {}) {
-  const cat = categoryMeta(section.catId);
-  const el = document.createElement('section');
-  el.className = `hand-collection-section hand-collection--${section.tier}`;
-  el.dataset.category = section.catId;
-  el.dataset.catId = section.catId;
-  el.style.setProperty('--cat-accent', cat.accent);
-
-  el.innerHTML = `
-    <header class="hand-collection-header">
-      <div class="hand-collection-title-row">
-        <span class="hand-collection-title">${cat.emoji} ${esc(cat.short.toUpperCase())}</span>
-        <span class="hand-collection-ratio">${section.maxCount}/4</span>
-      </div>
-      <div class="hand-set-blocks hand-collection-blocks" aria-label="${section.maxCount} of 4">${setProgressBlocks(section.maxCount)}</div>
-    </header>`;
-
-  const deck = document.createElement('div');
-  deck.className = 'stack-deck';
-  deck.dataset.category = section.catId;
-  deck.setAttribute('aria-label', `${cat.label} card stack`);
-
-  const suggestedRank = opts.suggested?.rank;
-  const n = section.ranks.length;
-  section.ranks.forEach(({ rank, cards }, i) => {
-    const filtered = opts.categoryFilter && cards[0]?.category !== opts.categoryFilter;
-    const canAsk = opts.playable && opts.askableRanks?.includes(rank);
-    const stack = buildRankCardElement(rank, cards, {
-      playable: canAsk,
-      filtered,
-      suggested: rank === suggestedRank,
-      onAsk: opts.onAsk,
-      onPreview: opts.onPreview,
-    });
-    stack.style.setProperty('--deck-i', String(i));
-    stack.style.setProperty('--deck-n', String(n));
-    deck.appendChild(stack);
-  });
-
-  el.appendChild(deck);
-  bindStackDeck(deck);
-  return el;
-}
-
-export function buildHandFan(hand, opts = {}) {
+/** Arc fan hand — Hearthstone / Balatro style (production hand layout). */
+export function buildHandArc(hand, opts = {}) {
   const wrap = document.createElement('div');
-  wrap.className = 'hand-shelf-scroller hand-shelf-scroller--carousel';
+  wrap.className = 'hand-shelf-scroller hand-shelf-scroller--arc';
 
   const rankMap = new Map();
   for (const c of hand) {
@@ -549,11 +377,15 @@ export function buildHandFan(hand, opts = {}) {
   }
 
   const shelf = document.createElement('div');
-  shelf.className = 'hand-shelf hand-shelf--carousel';
-  shelf.setAttribute('aria-label', 'Your cards — swipe to browse');
+  shelf.className = 'hand-shelf hand-shelf--arc';
+  shelf.setAttribute('aria-label', 'Your cards — tap to select, then Ask');
 
   const suggestedRank = opts.suggested?.rank;
+  const focusedRank = opts.focusedRank;
   const total = groups.length;
+  const cardW = HAND_CARD_W;
+  const cardH = HAND_CARD_H;
+
   groups.forEach(({ rank, cards }, index) => {
     const canAsk = opts.playable && opts.askableRanks?.includes(rank);
     const stack = buildRankCardElement(rank, cards, {
@@ -565,40 +397,22 @@ export function buildHandFan(hand, opts = {}) {
       onAsk: opts.onAsk,
       onPreview: opts.onPreview,
     });
-    const lay = handCarouselLayout(index, total);
-    stack.style.setProperty('--stack-w', `${lay.cardW}px`);
-    stack.style.setProperty('--stack-h', `${lay.cardH}px`);
-    stack.style.setProperty('--hand-gap', `${lay.gap}px`);
-    stack.style.zIndex = String(lay.z);
+    const { rot, arc, overlap, z } = fanLayout(index, total);
+    const lift = rank === focusedRank ? -20 : rank === suggestedRank ? -10 : 0;
+    stack.style.setProperty('--stack-w', `${cardW}px`);
+    stack.style.setProperty('--stack-h', `${cardH}px`);
+    stack.style.setProperty('--fan-rot', `${rot}deg`);
+    stack.style.setProperty('--fan-arc', `${arc}px`);
+    stack.style.setProperty('--fan-overlap', `${overlap}px`);
+    stack.style.setProperty('--fan-lift', `${lift}px`);
+    stack.style.zIndex = String(z);
+    stack.style.marginLeft = index === 0 ? '0' : `${overlap}px`;
     if (rank === suggestedRank) stack.dataset.suggested = '1';
+    if (rank === focusedRank) stack.classList.add('card-stack--focused');
     shelf.appendChild(stack);
   });
   shelf.dataset.handCount = String(total);
-
   wrap.appendChild(shelf);
-
-  if (total > 3) {
-    const hint = document.createElement('p');
-    hint.className = 'hand-scroll-hint';
-    hint.setAttribute('aria-hidden', 'true');
-    hint.textContent = 'Swipe your cards →';
-    wrap.appendChild(hint);
-  }
-
-  return wrap;
-}
-
-export function buildHandByCollections(hand, opts = {}) {
-  const wrap = document.createElement('div');
-  wrap.className = 'hand-collections-inner hand-stack-layout';
-  const sections = groupHandByCollection(hand, opts.activeCategories);
-  if (!sections.length) {
-    wrap.innerHTML = '<div class="empty-hand">Drawing from the fuck pond…</div>';
-    return wrap;
-  }
-  for (const section of sections) {
-    wrap.appendChild(buildCollectionSection(section, opts));
-  }
   return wrap;
 }
 

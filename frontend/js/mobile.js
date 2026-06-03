@@ -140,6 +140,17 @@ function bindViewportKeyboard() {
   onResize();
 }
 
+/** Hide install hint + conn banner chrome during active play. */
+export function setGameplayChrome(inGame) {
+  document.body.classList.toggle('gameplay-active', !!inGame);
+  const install = document.getElementById('install-hint');
+  const conn = document.getElementById('conn-banner');
+  if (inGame) {
+    install?.classList.add('hidden');
+    if (conn?.dataset.mode === 'online') conn?.classList.add('hidden');
+  }
+}
+
 export function initMobileUX() {
   document.documentElement.classList.toggle('ios', isIOS);
   document.documentElement.classList.toggle('touch', isIOS || navigator.maxTouchPoints > 0);

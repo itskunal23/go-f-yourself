@@ -1,17 +1,24 @@
 // ===========================================================================
-//  SIDE GAMES HUB
-//  A launcher that lets the two degenerates break away from Go Fish for a
-//  filthy mini-game, then come back. Each game plugs into the same drink +
-//  AI-host systems via the shared `ctx`.
+//  SIDE GAMES HUB — lazy-loaded so cold start stays fast.
 // ===========================================================================
 import { gameShell, esc } from './ui.js';
-import fuckingUno from './fuckinguno.js';
 
-export const SIDE_GAMES = [fuckingUno];
+export const SIDE_GAMES_META = [
+  { id: 'fuckinguno', name: 'Fucking UNO', emoji: '🃏', tagline: 'Pass & play chaos' },
+];
 
-// ctx = { players, current, drink(player, reason), host(mode, player, extra), toast }
+export const SIDE_GAMES = SIDE_GAMES_META;
+
+async function loadGame(id) {
+  if (id === 'fuckinguno') {
+    const mod = await import('./fuckinguno.js');
+    return mod.default;
+  }
+  return null;
+}
+
 export async function launchSideGame(id, ctx) {
-  const game = SIDE_GAMES.find((g) => g.id === id);
+  const game = await loadGame(id);
   if (!game) return ctx.toast?.('Unknown game, fucker.');
   const min = game.minPlayers || 1;
   const count = (ctx.players || []).filter((p) => p).length;
@@ -36,7 +43,7 @@ export function openGamesHub(ctx) {
 
   shell.body.innerHTML = `
     <div class="sg-hub-grid">
-      ${SIDE_GAMES.map(
+      ${SIDE_GAMES_META.map(
         (g) => `
         <button class="sg-hub-card" data-id="${esc(g.id)}">
           <span class="sg-hub-emoji">${g.emoji}</span>

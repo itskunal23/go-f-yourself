@@ -43,9 +43,9 @@
   </style>
   <link rel="canonical" href="https://go-f-yourself.onrender.com/" />
   <link rel="preload" href="/css/styles.css?v=94" as="style" />
-  <link rel="stylesheet" href="/css/styles.css?v=95" id="css-styles" />
-  <link rel="stylesheet" href="/css/card-stacks.css?v=7" id="css-stacks" />
-  <link rel="stylesheet" href="/css/game-theatre.css?v=12" id="css-theatre" />
+  <link rel="stylesheet" href="/css/styles.css?v=98" id="css-styles" />
+  <link rel="stylesheet" href="/css/card-stacks.css?v=9" id="css-stacks" />
+  <link rel="stylesheet" href="/css/game-theatre.css?v=15" id="css-theatre" />
   <link rel="stylesheet" href="/css/gfy-board.css?v=3" id="css-board" />
   <script>
     (function () {
@@ -97,16 +97,23 @@
           <p class="hig-subhead intro-subhead">Go Fish.<br>Drinking.<br>Tell each other to go fuck yourselves.</p>
           <ul class="intro-hook-list" aria-label="What you get">
             <li>Two phones. One room code.</li>
-            <li>AI roasts you personally.</li>
-            <li>Zero dignity. Maximum fuck.</li>
+            <li>AI roasts you after you play — optional.</li>
+          </ul>
+          <ul class="ios-inset-list intro-name-list">
+            <li class="ios-row-field">
+              <label class="ios-field-label" for="intro-name">Your Name</label>
+              <input id="intro-name" class="ios-field-input" placeholder="Required" autocomplete="nickname" maxlength="32" />
+            </li>
           </ul>
           <div class="stack btn-set intro-cta">
-            <button type="button" id="btn-create" class="btn-primary big btn-play">Create a Fucking Room</button>
-            <button type="button" id="btn-join" class="btn-secondary big">Join with a Code</button>
+            <button type="button" id="btn-create" class="btn-primary big btn-play">Create Room &amp; Play</button>
+            <button type="button" id="btn-join" class="btn-secondary big">Join with Code</button>
           </div>
           <p id="ai-status" class="ios-group-footer ai-status" aria-live="polite">Checking the fucking bartender…</p>
         </header>
 
+        <details class="intro-more" id="intro-more">
+          <summary class="intro-more-summary">How it works &amp; demo</summary>
         <section class="intro-demo-section" id="intro-demo-wrap" aria-label="Live demo preview">
           <div class="demo-card">
             <div class="demo-chrome">
@@ -167,12 +174,11 @@
         <section class="ios-group-wrap" aria-label="How it works">
           <h2 class="ios-group-header">How It Works</h2>
           <ul class="ios-inset-list">
-            <li class="ios-row-static"><span class="ios-row-label">Ask for cards. Say fuck a lot.</span></li>
-            <li class="ios-row-static"><span class="ios-row-label">Collect sets. Go fuck yourself when they don't have it.</span></li>
-            <li class="ios-row-static"><span class="ios-row-label">Bluff if you're a lying fuck.</span></li>
-            <li class="ios-row-static"><span class="ios-row-label">Get caught if you're a stupid fuck.</span></li>
+            <li class="ios-row-static"><span class="ios-row-label">Tap a card · tap Ask.</span></li>
+            <li class="ios-row-static"><span class="ios-row-label">Collect sets. Bluff. Drink.</span></li>
           </ul>
         </section>
+        </details>
 
         <footer class="intro-foot">
           <p class="ios-group-footer warn"><strong>21+ only.</strong> Comedy party game — not medical advice. Drink responsibly.</p>
@@ -208,11 +214,13 @@
               <input id="onboard-name" class="ios-field-input" placeholder="Required" autocomplete="nickname" />
             </li>
           </ul>
+          <div class="onboard-optional-detail" hidden>
           <h2 class="ios-group-header ios-group-header--sub">Your Role Tonight</h2>
           <p class="onboard-role-hint" id="onboard-role-hint">Kunal doms. Nandini submits. Pick yours.</p>
           <div class="role-grid" id="onboard-role" role="radiogroup" aria-label="Dom or sub"></div>
           <h2 class="ios-group-header ios-group-header--sub">Age Range</h2>
           <div class="age-range-grid" id="onboard-age-ranges" role="radiogroup" aria-label="Age range"></div>
+          </div>
         </div>
 
         <div class="onboard-step" data-step="join-code">
@@ -295,7 +303,7 @@
     <!-- ============ GAME — card table first ============ -->
     <section id="screen-game" class="screen game" hidden>
       <header class="game-top game-top-minimal">
-        <button type="button" class="back-btn game-back" id="btn-game-home" aria-label="Leave table">‹ Leave</button>
+        <button type="button" class="back-btn game-back hidden" id="btn-game-home" aria-label="Leave table" hidden>‹ Leave</button>
         <span class="turn-pill" id="turn-pill" role="status" aria-live="polite">—</span>
         <span class="chip chip-dim" id="room-chip" hidden aria-hidden="true">····</span>
       </header>
@@ -337,10 +345,6 @@
 
         <div id="target-pick" class="turn-panel hidden">
           <div id="target-list" class="target-list"></div>
-        </div>
-
-        <div id="rank-pick" class="turn-panel hidden">
-          <div id="rank-list" class="rank-list"></div>
         </div>
 
         <div class="sets-compact sets-done-strip" id="sets-compact">
@@ -401,10 +405,8 @@
       <div class="drawer-grab"></div>
       <ul class="game-actions-list">
         <li><button type="button" class="game-action-row" id="ga-rules">How to Play</button></li>
-        <li><button type="button" class="game-action-row" id="ga-stats">Stats</button></li>
-        <li><button type="button" class="game-action-row" id="ga-drink-log">Drink Log</button></li>
-        <li><button type="button" class="game-action-row" data-host="roast">Roast</button></li>
-        <li><button type="button" class="game-action-row" data-host="dare">Dare</button></li>
+        <li><button type="button" class="game-action-row" id="ga-stats">Stats &amp; Drinks</button></li>
+        <li><button type="button" class="game-action-row destructive-text" id="ga-leave">Leave Table</button></li>
         <li><button type="button" class="game-action-row" id="ga-side-games">Side Games</button></li>
       </ul>
       <button type="button" class="btn-secondary btn-cancel" id="btn-actions-close">Close</button>
@@ -414,6 +416,6 @@
   <!-- ============ MODALS / SHEETS ============ -->
   <div id="modal-root"></div>
 
-  <script type="module" src="/js/app.js?v=96"></script>
+  <script type="module" src="/js/app.js?v=98"></script>
 </body>
 </html>

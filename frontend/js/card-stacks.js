@@ -6,6 +6,7 @@ import gsap from '/vendor/gsap/index.js';
 import { rankMeta, categoryMeta } from './game.js?v=63';
 import { haptic } from './mobile.js';
 import {
+  createTransformGhost,
   motionEase,
   motionScale,
   EASE_SETTLE,
@@ -413,11 +414,10 @@ export const CardStackAnimator = {
       return;
     }
 
-    const rect = stackEl.getBoundingClientRect();
-    const ghost = stackEl.cloneNode(true);
-    ghost.className = 'card-stack card-stack--ghost';
-    ghost.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;margin:0;pointer-events:none;z-index:300`;
-    document.body.appendChild(ghost);
+    const { ghost } = createTransformGhost(stackEl, {
+      className: 'card-stack card-stack--ghost',
+      clone: true,
+    });
     stackEl.style.visibility = 'hidden';
 
     const layers = ghost.querySelectorAll('.card-stack__layer');

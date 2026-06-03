@@ -5,7 +5,7 @@
 // ===========================================================================
 import gsap from '/vendor/gsap/index.js';
 import { rankName, rankMeta, TOTAL_SETS, categoryMeta, CATEGORY_LIST, DEFAULT_CATEGORIES, sanitizeCategories, deckCatalog, ranksForCategories } from './game.js?v=63';
-import { buildCardElement, buildActiveCardElement, buildHandFan, buildHandByCollections, buildHandGroupElement, renderPhysicalDeck, renderOpponentHandVisual, playGfyMoment, playGameMoment, CardAudio, setProgressBlocks, setProgressLabel, animateHandCountBump, computeSuggestedAsk, computeBestCollection, groupHandByCollection } from './cards.js?v=80';
+import { buildActiveCardElement, renderPhysicalDeck, renderOpponentHandVisual, playGameMoment, CardAudio, setProgressBlocks, setProgressLabel, animateHandCountBump, computeSuggestedAsk } from './cards.js?v=82';
 import {
   animateCardPlay, animateComboComplete, animateBartenderRoast,
   hideBartenderRoast, dismissBartenderPop, animateDrinkPenalty, setOpponentTurnMode, animateOpponentPlay,
@@ -20,11 +20,22 @@ import { playerStatus } from './bac.js';
 import { GameSocket, getHealth, askHost } from './api.js';
 import { openGamesHub, launchSideGame, SIDE_GAMES } from './sidegames/index.js';
 import {
-  initMobileUX, copyText, haptic, requestWakeLock, releaseWakeLock,
+  initMobileUX, copyText, haptic, requestWakeLock, releaseWakeLock, setGameplayChrome,
 } from './mobile.js';
-import { setGameScrollLock, refreshHandTouchUI, initGameTouchUI } from './touch-ui.js?v=2';
-import { initHandDragAsk } from './hand-drag-ask.js?v=1';
-import { initCardHero } from './card-hero.js?v=1';
+import { setGameScrollLock, refreshHandTouchUI, initGameTouchUI } from './touch-ui.js?v=3';
+import { initHandDragAsk } from './hand-drag-ask.js?v=2';
+import { initCardHero, destroyCardHero } from './card-hero.js?v=2';
+import { initHandFocus, getFocusedRank, clearHandFocus, setFocusedRank } from './interactions/hand-focus.js?v=1';
+import { renderHandDiff, resetHandRenderCache } from './render/hand-render.js?v=2';
+import {
+  renderOpponentDiff,
+  renderGamePromptDiff,
+  renderTurnPanelsDiff,
+  resetTableDiffCache,
+  primaryActionSignature,
+} from './render/table-diff.js?v=1';
+import { escapeHtml } from './dom-utils.js';
+import { inferPlayRole } from './questionnaire.js';
 import {
   CardStackModel,
   CardStackAnimator,
@@ -39,8 +50,7 @@ import { animateAskIntent } from './ask-theatre.js?v=1';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
-import { questionnaireComplete } from './questionnaire.js';
-import { initOnboarding, openOnboarding, getOnboardingState, ONBOARD_RECOMMENDED, retryOnboardingLaunch, clearLaunchTimer } from './onboarding.js?v=71';
+import { initOnboarding, openOnboarding, getOnboardingState, presetOnboardingName, ONBOARD_RECOMMENDED, retryOnboardingLaunch, clearLaunchTimer } from './onboarding.js?v=72';
 import { renderDrinkEconomyHud, syncDrinkChoiceSheet, resetDrinkEconomyUi, openGiftSheet } from './drink-economy-ui.js?v=73';
 import { renderDrinkingBars, pulseDrinkingBar } from './drinking-bar.js?v=1';
 import { mountDrinkScanner } from './drink-scanner.js?v=1';
@@ -230,6 +240,11 @@ async function verifyUiAssets() {
 function init() {
   initMobileUX();
   initGameTouchUI();
+  initHandFocus({
+    onFocusChange: () => {
+      if (S.view) renderPrimaryAction(S.view);
+    },
+  });
   initHandDragAsk(() => {
     const view = S.view;
     const myTurn = view?.turnId === view?.you;
@@ -344,8 +359,10 @@ function goto(name) {
   if (name === 'game') {
     setGameScrollLock(true);
     requestWakeLock();
+    setGameplayChrome(true);
   } else {
     setGameScrollLock(false);
+    setGameplayChrome(false);
     if (name === 'intro') releaseWakeLock();
   }
 }
@@ -380,9 +397,55 @@ function initIntroDemo() {
   });
 }
 
+function introName() {
+  return ($('#intro-name')?.value || '').trim();
+}
+
+function buildQuickProfile(name) {
+  const playRole = inferPlayRole(name) || 'dom';
+  return {
+    name,
+    sex: playRole === 'sub' ? 'female' : 'male',
+    playRole,
+    age: 30,
+    heightCm: 170,
+    weightKg: 70,
+    questionnaire: {},
+  };
+}
+
+function quickLaunchCreate() {
+  const name = introName();
+  if (name.length < 2) {
+    toast('Enter your name.');
+    $('#intro-name')?.focus();
+    return;
+  }
+  S.mode = 'create';
+  S.gameMode = 'drinking';
+  S.cardCategories = [...ONBOARD_RECOMMENDED];
+  const profile = buildQuickProfile(name);
+  S.socket.clearSession();
+  S.socket.send({ t: 'create', profile, gameMode: S.gameMode, cardCategories: S.cardCategories });
+  haptic('medium');
+}
+
+function quickLaunchJoin() {
+  const name = introName();
+  if (name.length < 2) {
+    toast('Enter your name.');
+    $('#intro-name')?.focus();
+    return;
+  }
+  S.mode = 'join';
+  presetOnboardingName(name);
+  openOnboarding('join');
+  goto('profile');
+}
+
 function wireUI() {
-  $('#btn-create').addEventListener('click', () => { S.mode = 'create'; openProfile(); });
-  $('#btn-join').addEventListener('click', () => { S.mode = 'join'; openProfile(); });
+  $('#btn-create').addEventListener('click', quickLaunchCreate);
+  $('#btn-join').addEventListener('click', quickLaunchJoin);
   $$('[data-back]').forEach((b) => b.addEventListener('click', () => goto(b.dataset.back)));
 
   $$('.react-btn').forEach((b) =>
@@ -410,11 +473,12 @@ function wireUI() {
   $('#ga-stats')?.addEventListener('click', () => {
     closeGameActionsSheet();
     $('#meters-drawer')?.classList.remove('hidden');
+    if (S.view) renderMetersWhenOpen(S.view);
     haptic('light');
   });
-  $('#ga-drink-log')?.addEventListener('click', () => {
+  $('#ga-leave')?.addEventListener('click', () => {
     closeGameActionsSheet();
-    $('#meters-drawer')?.classList.remove('hidden');
+    goHome();
     haptic('light');
   });
   $$('#game-actions-sheet .game-action-row[data-host]').forEach((b) =>
@@ -474,10 +538,6 @@ function submitOnboardingProfile(profile) {
   }
   if (!profile.playRole) {
     toast('Pick Dom or Sub on the About You step.');
-    return false;
-  }
-  if (!questionnaireComplete(profile.questionnaire)) {
-    toast('Finish the roast cards — the bartender needs ammo.');
     return false;
   }
   S.gameMode = ob?.gameMode || S.gameMode;
@@ -579,6 +639,10 @@ function absorbSnapshot(view) {
 function maybeRunTableOpening(view) {
   if (S.openingPlayed || !view?.started || view.finished) return;
   if (view.event?.kind !== 'start' && view.event?.kind !== 'restart') return;
+  try {
+    if (sessionStorage.getItem('gfy_table_opening_seen') === '1') return;
+    sessionStorage.setItem('gfy_table_opening_seen', '1');
+  } catch { /* private mode */ }
   S.openingPlayed = true;
   const cardsPerPlayer = view.players.length >= 5 ? 4 : 5;
   const playerBand = view.players.length >= 5 ? '5–6 players' : '2–4 players';
@@ -992,6 +1056,10 @@ function goHome() {
   closeAllSheets();
   $('#meters-drawer')?.classList.add('hidden');
   releaseWakeLock();
+  clearHandFocus();
+  resetHandRenderCache();
+  resetTableDiffCache();
+  destroyCardHero();
   S.socket.shouldReconnect = false;
   S.socket.send({ t: 'leave' });
   S.socket.clearSession();
@@ -1033,31 +1101,49 @@ function renderGame(view) {
   }
   if (myTurn) {
     if (!S.hadMyTurn) haptic('turn');
-    if (S.bartenderExpanded) setBartenderExpanded(false);
+    setBartenderExpanded(false);
   }
   S.hadMyTurn = myTurn;
 
   if (!myTurn) {
     S.selectedTarget = null;
     S.selectedRank = null;
+    clearHandFocus();
   }
 
-  renderOpponent(view);
+  const tableCtx = getTableRenderCtx();
+  renderOpponentDiff(view, tableCtx);
   renderGameScoreboard(view);
   renderDeckPile(view);
   renderActiveCard(view);
-  renderGamePrompt(view);
+  renderGamePromptDiff(view, tableCtx);
   renderPrimaryAction(view);
   renderGameToast(view);
   renderHost(view);
-  renderTurnPanels(view);
+  renderTurnPanelsDiff(view, tableCtx);
   renderHand(view, myTurn);
   syncSetCompletionUI(view);
   renderCompletedSets(view);
   renderPlayerStatusBar(view);
   renderDrinkEconomyHud(view, S.socket);
-  renderMeters(view);
+  renderMetersWhenOpen(view);
   renderReactions(view);
+}
+
+function getTableRenderCtx() {
+  return {
+    $,
+    S,
+    escapeHtml,
+    opponentOf,
+    opponentsOf,
+    renderHand,
+    setOpponentReaction,
+    setOpponentTurnMode,
+    showGameToast,
+    playerStatus,
+    chaosLabel,
+  };
 }
 
 function opponentOf(view) {
@@ -1082,25 +1168,21 @@ function renderGameScoreboard(view) {
   const el = $('#game-scoreboard');
   if (!el) return;
   el.classList.add('hidden');
-  if (!view || view.finished) return;
-  el.innerHTML = view.players.map((p) => {
-    const mine = p.id === view.you;
-    const isTurn = view.turnId === p.id;
-    const books = p.books?.length ?? 0;
-    const short = escapeHtml(p.name.split(' ')[0]);
-    const setsLabel = books === 1 ? 'Set' : 'Sets';
-    return `<div class="score-pill${mine ? ' mine' : ''}${isTurn ? ' turn' : ''}" data-player-id="${p.id}">
-      <span class="score-pill-name">${short}</span>
-      <span class="score-pill-trophy" aria-label="${books} sets completed">🔥 ${books} ${setsLabel}</span>
-    </div>`;
-  }).join('');
 }
+
+let lastPrimarySig = '';
 
 function renderPrimaryAction(view) {
   const btn = $('#play-primary');
   if (!btn) return;
   const myTurn = view.turnId === view.you;
   const blocked = !!view.prompt || !!view.waitingOn;
+  const sig = primaryActionSignature(view, getFocusedRank());
+  if (sig === lastPrimarySig && !view.prompt?.type) {
+    if (!myTurn || blocked) btn.classList.add('hidden');
+    return;
+  }
+  lastPrimarySig = sig;
 
   if (view.prompt?.type === 'createSet') {
     btn.classList.remove('hidden');
@@ -1130,19 +1212,25 @@ function renderPrimaryAction(view) {
     btn.classList.add('hidden');
     return;
   }
-  const suggested = computeSuggestedAsk(view.yourHand, view.askableRanks);
-  if (!suggested) {
+  const rank = getFocusedRank() || computeSuggestedAsk(view.yourHand, view.askableRanks)?.rank;
+  if (!rank || !view.askableRanks?.includes(rank)) {
     btn.classList.add('hidden');
     return;
   }
   const opp = opponentOf(view);
   const oppName = opp?.name.split(' ')[0] || 'them';
+  const line = rankMeta(rank).line || rank;
   btn.classList.remove('hidden');
-  btn.innerHTML = `<span class="play-primary-label">Ask ${escapeHtml(oppName)}</span>`;
+  btn.innerHTML = `<span class="play-primary-label">Ask ${escapeHtml(oppName)}</span><span class="play-primary-sub">${escapeHtml(line)}</span>`;
   btn.onclick = () => {
+    const card = document.querySelector(`.card-stack[data-rank="${rank}"]`);
+    if (!card) {
+      haptic('error');
+      toast('Pick a card first.');
+      return;
+    }
     haptic('medium');
-    const card = document.querySelector(`.hand-rank-card[data-rank="${suggested.rank}"]`);
-    sendAsk(suggested.rank, card);
+    sendAsk(rank, card);
   };
 }
 
@@ -1152,58 +1240,6 @@ function notifyOpponentSetReady(askerName) {
   stage?.classList.add('opponent-avatar-stage--set-pending');
   showGameToast(`${short} can bank a set — watch the table`, 3200);
   setOpponentReaction('set');
-}
-
-function renderOpponent(view) {
-  const opp = opponentOf(view);
-  const bar = $('#opponent-bar');
-  const handVis = $('#opponent-hand-visual');
-  const avHand = $('#opponent-avatar-hand');
-  const avName = $('#opponent-avatar-name');
-  const avStage = $('#opponent-avatar-stage');
-  if (!opp) return;
-
-  const isTurn = view.turnId === opp.id;
-  const name = escapeHtml(opp.name.split(' ')[0]);
-  const mood = isTurn && !view.prompt
-    ? 'Thinking…'
-    : `${opp.handCount} card${opp.handCount === 1 ? '' : 's'}`;
-
-  if (avName) avName.textContent = name;
-  avStage?.classList.toggle('opponent-avatar-stage--turn', isTurn);
-  const oppSetWait = view.prompt?.type === 'createSetWait';
-  avStage?.classList.toggle('opponent-avatar-stage--set-pending', oppSetWait);
-  if (isTurn && !view.prompt) setOpponentReaction('think');
-
-  if (avHand) {
-    avHand.innerHTML = renderOpponentHandVisual(opp.handCount, { maxShow: 7 });
-    avHand.querySelector('.opp-hand-fan')?.classList.add('opp-hand--alive');
-  }
-
-  if (bar) {
-    bar.className = `opponent-bar${isTurn ? ' turn' : ''}`;
-    bar.innerHTML = `
-      <span class="opp-name">${name}</span>
-      <span class="opp-mood">${mood}</span>`;
-  }
-
-  if (handVis) {
-    handVis.innerHTML = renderOpponentHandVisual(opp.handCount);
-    handVis.querySelector('.opp-hand-fan')?.classList.add('opp-hand--alive');
-  }
-
-  if (isTurn && view.turnId !== view.you && !view.prompt) {
-    setOpponentTurnMode(true, opp.name.split(' ')[0]);
-  } else if (view.turnId === view.you) {
-    setOpponentTurnMode(false);
-  }
-
-  if (isTurn && opp.isBot && !view.prompt && S.lastPlottingTurn !== view.turnId) {
-    S.lastPlottingTurn = view.turnId;
-    showGameToast(`${opp.name.split(' ')[0]} thinking…`);
-  } else if (!isTurn) {
-    S.lastPlottingTurn = null;
-  }
 }
 
 function showGameToast(msg, ms = 2200) {
@@ -1221,109 +1257,16 @@ function showGameToast(msg, ms = 2200) {
   }, ms);
 }
 
-function renderGamePrompt(view) {
-  const el = $('#game-prompt');
-  if (!el || view.finished) {
-    el?.classList.add('hidden');
-    return;
-  }
-
-  const myTurn = view.turnId === view.you;
-  const blocked = !!view.prompt || !!view.waitingOn;
-  const opp = opponentOf(view);
-  const oppName = opp?.name.split(' ')[0] || 'them';
-  const opponents = opponentsOf(view);
-
-  if (view.prompt?.type === 'createSet') {
-    el.className = 'game-prompt prompt-set show';
-    el.innerHTML = `<span>CREATE SET</span>`;
-    return;
-  }
-
-  if (view.prompt?.type === 'createSetWait') {
-    el.className = 'game-prompt prompt-wait show';
-    el.innerHTML = `<span>${escapeHtml(view.prompt.playerName)} creating set…</span>`;
-    return;
-  }
-
-  if (view.prompt?.type === 'bluff') {
-    el.className = 'game-prompt prompt-bluff show';
-    el.innerHTML = `<span>Truth or lie?</span>`;
-    return;
-  }
-
-  if (view.prompt?.type === 'bluffWait') {
-    el.className = 'game-prompt prompt-wait show';
-    el.innerHTML = `<span>${escapeHtml(view.prompt.defenderName)} deciding…</span>`;
-    return;
-  }
-
-  if (view.prompt?.type === 'chaos') {
-    el.className = 'game-prompt prompt-chaos show';
-    el.innerHTML = `<span>${escapeHtml(view.prompt.text || view.prompt.hint || 'Complete it')}</span>`;
-    return;
-  }
-
-  if (view.prompt?.type === 'drink') {
-    el.className = 'game-prompt prompt-gfy show';
-    el.innerHTML = `<span>Draw${view.gameMode !== 'casual' ? ' · drink' : ''}</span>`;
-    return;
-  }
-
-  if (view.waitingOn) {
-    el.className = 'game-prompt prompt-wait show';
-    el.innerHTML = `<span>Waiting to fuck…</span>`;
-    return;
-  }
-
-  if (!myTurn) {
-    const turnPlayer = view.players.find((p) => p.id === view.turnId);
-    const waitName = turnPlayer?.name.split(' ')[0] || 'Them';
-    el.className = 'game-prompt prompt-wait prompt-hero show';
-    el.innerHTML = `
-      <div class="turn-hero-divider" aria-hidden="true"></div>
-      <strong class="turn-hero-title turn-hero-title--wait">WAITING FOR ${escapeHtml(waitName.toUpperCase())}</strong>
-      <div class="turn-hero-divider" aria-hidden="true"></div>
-      <span class="turn-hero-sub turn-hero-sub--muted">Their fucking move — hang tight</span>`;
-    return;
-  }
-
-  if (blocked) {
-    el.classList.add('hidden');
-    return;
-  }
-
-  if (opponents.length > 1 && !S.selectedTarget) {
-    el.className = 'game-prompt prompt-turn prompt-hero show';
-    el.innerHTML = `
-      <div class="turn-hero-divider" aria-hidden="true"></div>
-      <strong class="turn-hero-title">YOUR TURN</strong>
-      <div class="turn-hero-divider" aria-hidden="true"></div>
-      <span class="turn-hero-sub">Pick who to ask</span>`;
-    return;
-  }
-
-  const target = opponents.find((p) => p.id === S.selectedTarget) || opp;
-  const targetName = target?.name.split(' ')[0] || oppName;
-  const suggested = computeSuggestedAsk(view.yourHand, view.askableRanks);
-  el.className = 'game-prompt prompt-turn prompt-hero show';
-  if (suggested) {
-    el.innerHTML = `
-      <strong class="turn-hero-title turn-hero-title--fish">Fish for shameful secrets</strong>
-      <span class="turn-hero-sub">Swipe to center a card · drag up to ${escapeHtml(targetName)}</span>`;
-    return;
-  }
-  el.innerHTML = `
-    <strong class="turn-hero-title turn-hero-title--fish">Fish for shameful secrets</strong>
-    <span class="turn-hero-sub">Ask ${escapeHtml(targetName)}: <em>"Hey, do you have a…?"</em></span>`;
-}
-
 function renderDeckPile(view) {
   $('#deck-count').textContent = view.deckCount;
   const stack = $('#deck-stack');
   if (!stack) return;
-  stack.className = 'deck-stack deck-stack--pond';
-  stack.innerHTML = renderPhysicalDeck(view.deckCount);
+  const sig = String(view.deckCount);
+  if (stack.dataset.deckSig !== sig) {
+    stack.dataset.deckSig = sig;
+    stack.className = 'deck-stack deck-stack--pond';
+    stack.innerHTML = renderPhysicalDeck(view.deckCount);
+  }
   $('#deck-pile-wrap')?.classList.toggle('deck-pile-wrap--pond-ready', view.deckCount > 0);
 }
 
@@ -1375,46 +1318,22 @@ function renderActiveCard(view) {
   mount.innerHTML = '';
 }
 
-function renderTurnPanels(view) {
-  const myTurn = view.turnId === view.you;
-  const blocked = !!view.prompt || !!view.waitingOn;
-  const targetPanel = $('#target-pick');
-  const rankPanel = $('#rank-pick');
-  const opponents = opponentsOf(view);
-
-  if (!myTurn || blocked) {
-    targetPanel.classList.add('hidden');
-    rankPanel.classList.add('hidden');
-    return;
-  }
-
-  if (opponents.length === 1) {
-    S.selectedTarget = opponents[0].id;
-    targetPanel.classList.add('hidden');
-    rankPanel.classList.add('hidden');
-    return;
-  }
-
-  targetPanel.classList.remove('hidden');
-  rankPanel.classList.add('hidden');
-  $('#target-list').innerHTML = opponents.map((p) => `
-    <button type="button" class="target-btn ${S.selectedTarget === p.id ? 'selected' : ''}" data-id="${p.id}">
-      ${escapeHtml(p.name.split(' ')[0])} · ${p.handCount} cards
-    </button>`).join('');
-  $('#target-list').querySelectorAll('.target-btn').forEach((btn) => {
-    btn.onclick = () => {
-      S.selectedTarget = btn.dataset.id;
-      renderTurnPanels(view);
-      renderHand(view, true);
-    };
-  });
-}
-
 function sendAsk(rank, cardEl = null, { skipTheatre = false } = {}) {
   const view = S.view;
-  if (!view || view.turnId !== view.you || !S.selectedTarget || !rank) return;
-  if (view.prompt || view.waitingOn || isTableOpeningBusy()) return;
+  if (!view || view.turnId !== view.you || !S.selectedTarget || !rank) {
+    haptic('error');
+    return;
+  }
+  if (view.prompt || view.waitingOn || isTableOpeningBusy()) {
+    haptic('error');
+    return;
+  }
   if (S.askInFlight) return;
+  if (!view.askableRanks?.includes(rank)) {
+    haptic('error');
+    toast('You can\u2019t ask for that rank.');
+    return;
+  }
 
   const fromEl = cardEl || document.querySelector(`.card-stack[data-rank="${rank}"], .hand-rank-card[data-rank="${rank}"], .hand-topic-group[data-rank="${rank}"]`);
   const toEl = $('#active-card');
@@ -1422,7 +1341,8 @@ function sendAsk(rank, cardEl = null, { skipTheatre = false } = {}) {
   S.askInFlight = true;
   const go = () => {
     S.socket.send({ t: 'ask', targetId: S.selectedTarget, rank });
-    S.selectedTarget = null;
+    if (opponentsOf(view).length > 1) S.selectedTarget = null;
+    clearHandFocus();
     haptic('light');
   };
 
@@ -1533,41 +1453,31 @@ function groupHandByRank(hand, catalog = []) {
 
 function renderHand(view, myTurn) {
   const hand = $('#hand');
-  if (isTableOpeningBusy() && hand?.children.length) return;
   const handWrap = $('#hand-wrap');
   const askNext = $('#hand-ask-next');
-  const count = view.yourHand.length;
   const blocked = !!view.prompt || !!view.waitingOn;
   const opponents = opponentsOf(view);
   if (opponents.length === 1) S.selectedTarget = opponents[0].id;
   const playable = myTurn && !blocked && !!S.selectedTarget;
 
-  hand.classList.remove('peek-stack', 'hand-grouped', 'hand-collections', 'hand-fan');
-  hand.classList.add('hand-shelf-mount');
-  delete hand.dataset.extra;
-
-  hand.innerHTML = '';
-  if (!count) {
-    hand.innerHTML = '<div class="empty-hand">Drawing from the fuck pond…</div>';
-    askNext?.classList.add('hidden');
-    return;
-  }
+  const rebuilt = renderHandDiff(hand, view, {
+    myTurn,
+    blocked,
+    selectedTarget: S.selectedTarget,
+    onAsk: (r, el, opts) => sendAsk(r, el, opts),
+    onPreview: (c, el) => openCardExpandOverlay(c, view, {
+      playable: playable && view.askableRanks?.includes(c.rank),
+      cardEl: el,
+    }),
+    isOpeningBusy: isTableOpeningBusy,
+  });
 
   const suggested = playable ? computeSuggestedAsk(view.yourHand, view.askableRanks) : null;
-
-  hand.appendChild(buildHandFan(view.yourHand, {
-    playable,
-    askableRanks: view.askableRanks,
-    suggested,
-    onAsk: (r, el) => sendAsk(r, el),
-    onPreview: (c, el) => openCardExpandOverlay(c, view, { playable: playable && view.askableRanks?.includes(c.rank), cardEl: el }),
-  }));
-
   renderAskNext(askNext, { suggested, playable, view });
 
-  requestAnimationFrame(() => {
-    refreshHandTouchUI(handWrap);
-  });
+  if (rebuilt) {
+    requestAnimationFrame(() => refreshHandTouchUI(handWrap));
+  }
 }
 
 function renderCompletedSets(view) {
@@ -1872,64 +1782,9 @@ function renderPlayerStatusBar(view) {
   wrap.innerHTML = '';
 }
 
-function renderBooks(view) {
-  const me = meOf(view);
-  const wrap = $('#sets-compact');
-  const hasSets = (me?.books.length || 0) > 0;
-  const hasLog = Object.values(view.setProgress || {}).some((p) => p.sets?.length);
-  if (!hasSets && !hasLog) {
-    $('#books-row').innerHTML = '';
-    wrap?.classList.add('hidden');
-    return;
-  }
-  wrap?.classList.remove('hidden');
-  const target = S.view?.totalSets || TOTAL_SETS;
-  if (hasSets) {
-    $('#books-row').innerHTML = `<span class="book-chip set-chip">🏆 ${me.books.length}/${target}</span>`
-      + me.books.map((r) => {
-        const cat = categoryMeta(rankMeta(r).category);
-        return `<span class="book-chip book-chip--${cat.id}" style="--cat-accent:${cat.accent}" title="${escapeHtml(cat.label)}">${cat.emoji} ${escapeHtml(rankName(r))}</span>`;
-      }).join('');
-  } else {
-    $('#books-row').innerHTML = `<span class="book-chip set-chip">🏆 0/${target}</span>`;
-  }
-}
-
-function renderSetProgress(view) {
-  const logEl = $('#set-progress-log');
-  if (!logEl) return;
-  const progress = view.setProgress || {};
-  const entries = [];
-  for (const p of view.players) {
-    const sets = progress[p.id]?.sets || [];
-    for (const s of sets) {
-      entries.push({
-        playerName: p.name.split(' ')[0],
-        line: s.line || rankName(s.rank),
-        category: s.category,
-        at: s.at || 0,
-        mine: p.id === view.you,
-      });
-    }
-  }
-  entries.sort((a, b) => a.at - b.at);
-  if (!entries.length) {
-    logEl.classList.add('hidden');
-    logEl.innerHTML = '';
-    return;
-  }
-  logEl.classList.remove('hidden');
-  logEl.innerHTML = `<h4>Set log</h4>`
-    + entries.map((e) => {
-      const cat = categoryMeta(e.category || 'filthy');
-      return `<div class="set-progress-entry">
-        <span class="set-player">${escapeHtml(e.playerName)}${e.mine ? ' · you' : ''}</span>
-        <span class="set-line">${cat.emoji} ${escapeHtml(e.line)}</span>
-      </div>`;
-    }).join('');
-}
-
-function renderMeters(view) {
+function renderMetersWhenOpen(view) {
+  const drawer = $('#meters-drawer');
+  if (!drawer || drawer.classList.contains('hidden')) return;
   const drinking = view?.gameMode !== 'casual' ? renderDrinkingBars(view) : '';
   const bac = view.players.map((p) => {
     const st = playerStatus({
@@ -1945,7 +1800,12 @@ function renderMeters(view) {
       <div class="m-stats">🍺 ${st.totalStandardDrinks} std drink${st.totalStandardDrinks === 1 ? '' : 's'} · BAC ~${st.bac}%</div>
     </div>`;
   }).join('');
-  $('#meters').innerHTML = (drinking ? `<div class="meters-drinking-block">${drinking}</div>` : '') + bac;
+  const sig = drinking + bac;
+  const meters = $('#meters');
+  if (meters && meters.dataset.metersSig !== sig) {
+    meters.dataset.metersSig = sig;
+    meters.innerHTML = (drinking ? `<div class="meters-drinking-block">${drinking}</div>` : '') + bac;
+  }
 }
 
 function renderReactions(view) {
@@ -2231,20 +2091,45 @@ function openInterventionSheet(level) {
 // ---------------------------------------------------------------------------
 // SHEET / TOAST PRIMITIVES (iOS-style bottom sheets)
 // ---------------------------------------------------------------------------
-function openSheet(innerHtml, { danger = false } = {}) {
+function openSheet(innerHtml, { danger = false, label = 'Dialog' } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'sheet-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', label);
   overlay.innerHTML = `<div class="sheet ${danger ? 'danger' : ''}">${innerHtml}</div>`;
-  $('#modal-root').appendChild(overlay);
+  const root = $('#modal-root');
+  root?.appendChild(overlay);
+  const prevFocus = document.activeElement;
+  const sheet = overlay.querySelector('.sheet');
+  const focusable = () => [...sheet.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((el) => !el.disabled);
   const close = () => {
     overlay.classList.remove('show');
-    setTimeout(() => overlay.remove(), 220);
+    document.removeEventListener('keydown', onKey);
+    setTimeout(() => {
+      overlay.remove();
+      if (prevFocus?.focus) prevFocus.focus();
+    }, 220);
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (e.key !== 'Tab') return;
+    const nodes = focusable();
+    if (!nodes.length) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   };
   bindBottomSheetGestures(overlay, close);
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) close();
   });
-  requestAnimationFrame(() => overlay.classList.add('show'));
+  document.addEventListener('keydown', onKey);
+  requestAnimationFrame(() => {
+    overlay.classList.add('show');
+    (focusable()[0] || sheet)?.focus?.();
+  });
   close.overlay = overlay;
   return close;
 }
@@ -2463,10 +2348,6 @@ function toast(msg) {
   document.body.appendChild(t);
   requestAnimationFrame(() => t.classList.add('show'));
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 250); }, 3000);
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 init();

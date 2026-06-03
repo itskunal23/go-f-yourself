@@ -2,6 +2,7 @@
 import { isIOS } from './mobile.js';
 
 let bound = false;
+let orientHandler = null;
 
 function applyTilt(mount, e) {
   if (mount.classList.contains('empty')) return;
@@ -19,10 +20,10 @@ export function initCardHero() {
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (reduced) return;
 
-  const onOrient = (e) => applyTilt(mount, e);
+  orientHandler = (e) => applyTilt(mount, e);
 
   const start = () => {
-    window.addEventListener('deviceorientation', onOrient, { passive: true });
+    window.addEventListener('deviceorientation', orientHandler, { passive: true });
     bound = true;
   };
 
@@ -39,9 +40,18 @@ export function initCardHero() {
   }
 }
 
+export function destroyCardHero() {
+  if (orientHandler) {
+    window.removeEventListener('deviceorientation', orientHandler);
+    orientHandler = null;
+  }
+  bound = false;
+  resetCardHeroTilt();
+}
+
 export function resetCardHeroTilt() {
   const mount = document.getElementById('active-card');
   if (!mount) return;
-  mount.style.setProperty('--hero-tilt-x', '-4deg');
-  mount.style.setProperty('--hero-tilt-y', '3deg');
+  mount.style.setProperty('--hero-tilt-x', '0deg');
+  mount.style.setProperty('--hero-tilt-y', '0deg');
 }

@@ -41,8 +41,9 @@ const ROLE_OPTIONS = [
   { id: 'sub', emoji: '🎀', label: 'Sub', sub: 'I submit & obey' },
 ];
 
-const CREATE_STEPS = ['intensity', 'deck', 'about', 'roast'];
-const JOIN_STEPS = ['join-code', 'about', 'roast'];
+/** Quick play: minimal steps — roast deferred to post-game profile. */
+const CREATE_STEPS = ['about'];
+const JOIN_STEPS = ['join-code', 'about'];
 
 /** @type {object} */
 let state = null;
@@ -133,7 +134,12 @@ function canAdvance(step) {
   if (step === 'intensity') return !!state.gameMode;
   if (step === 'deck') return state.cardCategories.length > 0;
   if (step === 'about') {
-    return liveName().length >= 2 && !!state.ageRange && !!state.playRole;
+    const name = liveName();
+    if (name.length >= 2) {
+      if (!state.playRole) state.playRole = inferPlayRole(name) || 'dom';
+      if (!state.ageRange) state.ageRange = '25-34';
+    }
+    return name.length >= 2;
   }
   if (step === 'join-code') return state.joinCode.length === 4;
   return true;
@@ -324,7 +330,7 @@ function renderRoastCard() {
     renderKinkRankCard(mount, field);
     return;
   }
-  const opts = field.options.slice(0, 4);
+  const opts = field.options;
   mount.innerHTML = `
     <div class="roast-card" data-q="${field.key}">
       <div class="roast-card-emoji">${field.emoji}</div>
@@ -611,7 +617,7 @@ function showComplete() {
   try {
     gsap.fromTo(inner, { scale: 0.8, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.5, ease: 'back.out(1.5)' });
   } catch { /* animation optional */ }
-  setTimeout(finishLaunch, 1200);
+  setTimeout(finishLaunch, 400);
 }
 
 function buildProfile() {
@@ -658,7 +664,7 @@ function goBack() {
 export function initOnboarding({ onSubmit, onCancel, onChange } = {}) {
   state = {
     mode: 'create',
-    step: 'intensity',
+    step: 'about',
     gameMode: 'drinking',
     cardCategories: [...ONBOARD_RECOMMENDED],
     name: '',
@@ -689,6 +695,12 @@ export function initOnboarding({ onSubmit, onCancel, onChange } = {}) {
     }
     if (!canAdvance(state.step)) return;
     haptic('light');
+    const steps = stepsForMode(state.mode);
+    const idx = steps.indexOf(state.step);
+    if (idx >= steps.length - 1) {
+      showComplete();
+      return;
+    }
     advanceStep();
   });
   $('#btn-roast-skip')?.addEventListener('click', skipRoastQuestion);
@@ -711,6 +723,15 @@ function syncJoinBoxes(code) {
     cell.textContent = c === '·' ? '' : c;
     cell.classList.toggle('filled', c !== '·');
   });
+}
+
+export function presetOnboardingName(name) {
+  if (!state) return;
+  const n = String(name || '').trim();
+  state.name = n;
+  const input = $('#onboard-name');
+  if (input) input.value = n;
+  syncPlayRoleFromName();
 }
 
 export function openOnboarding(mode = 'create') {
@@ -736,9 +757,7 @@ export function openOnboarding(mode = 'create') {
   const nameInput = $('#onboard-name');
   if (nameInput) nameInput.value = '';
 
-  const first = mode === 'join' ? 'join-code' : 'intensity';
-  renderIntensityStep();
-  renderDeckStep();
+  const first = mode === 'join' ? 'join-code' : 'about';
   renderAboutStep();
   showStep(first);
   state.onChange?.({ gameMode: state.gameMode, cardCategories: state.cardCategories });
@@ -751,6 +770,6 @@ export function getOnboardingState() {
     cardCategories: [...state.cardCategories],
     profile: buildProfile(),
     joinCode: state.joinCode,
-    ready: questionnaireComplete(state.questionnaire) && canAdvance('about'),
+    ready: canAdvance('about'),
   } : null;
 }

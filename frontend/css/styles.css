@@ -285,6 +285,24 @@ body {
 }
 .ios-field-input::placeholder { color: var(--label-secondary); }
 .ios-field-input:focus { outline: none; }
+.ios-field-input:focus-visible {
+  outline: 2px solid var(--accent, #ff6b2c);
+  outline-offset: 2px;
+}
+body.gameplay-active #install-hint,
+body.gameplay-active #conn-banner[data-mode="online"] {
+  display: none !important;
+}
+.intro-more { margin: 0 16px 12px; }
+.intro-more-summary {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 0;
+}
+.intro-name-list { margin: 0 16px 16px; }
 .ios-row-slider {
   display: block;
   padding: 12px 16px 14px;

@@ -1,5 +1,7 @@
 // Bluff theatre — slower, darker, poker-tension motion (contrasts with card collection).
 import gsap from '/vendor/gsap/index.js';
+import { createTransformGhost } from './motion.js';
+import { springGhostToRect } from './physics/card-motion.js';
 import { buildActiveCardElement, renderCardBack } from './cards.js?v=75';
 import { GameAudio, speakAnnouncer } from './game-audio.js?v=63';
 import { haptic } from './mobile.js';
@@ -57,37 +59,34 @@ export async function animateCardGive({ rank, targetName, cardCount = 1, destEl 
 
   await new Promise((r) => setTimeout(r, 280));
 
-  const ghost = document.createElement('div');
-  ghost.className = 'bluff-card-ghost golden-trail';
-  if (fromSlot) {
-    const from = fromSlot.getBoundingClientRect();
-    ghost.innerHTML = renderCardBack({ mini: true });
-    ghost.style.cssText = `left:${from.left}px;top:${from.top}px;width:${from.width}px;height:${from.height}px`;
-  } else if (fromGroup) {
-    const from = fromGroup.getBoundingClientRect();
-    ghost.style.cssText = `left:${from.left}px;top:${from.top}px;width:${from.width}px;height:${from.height}px`;
-    ghost.appendChild(fromGroup.cloneNode(true));
+  const source = fromSlot || fromGroup;
+  let ghost;
+  let fromRect;
+  if (source) {
+    ({ ghost, from: fromRect } = createTransformGhost(source, { className: 'bluff-card-ghost golden-trail' }));
   } else {
+    ghost = document.createElement('div');
+    ghost.className = 'bluff-card-ghost golden-trail';
     ghost.innerHTML = renderCardBack();
-    ghost.style.cssText = 'left:50%;top:22%;width:68px;height:95px;transform:translate(-50%,-50%)';
+    ghost.style.cssText = 'position:fixed;left:0;top:0;width:68px;height:95px;pointer-events:none;will-change:transform';
+    document.body.appendChild(ghost);
+    const cx = window.innerWidth / 2 - 34;
+    const cy = window.innerHeight * 0.22 - 48;
+    gsap.set(ghost, { x: cx, y: cy, force3D: true });
+    fromRect = { width: 68, height: 95, left: cx, top: cy };
   }
-  document.body.appendChild(ghost);
   ghost.classList.add('card-glow');
 
-  const to = mount?.getBoundingClientRect() || { left: window.innerWidth / 2, top: window.innerHeight * 0.45, width: 120, height: 168 };
+  const to = mount?.getBoundingClientRect() || { left: window.innerWidth / 2 - 60, top: window.innerHeight * 0.45, width: 120, height: 168 };
   GameAudio.cardFwip();
 
-  await new Promise((resolve) => {
-    gsap.to(ghost, {
-      left: to.left + (to.width - (ghost.offsetWidth || 68)) / 2,
-      top: to.top + (to.height - (ghost.offsetHeight || 95)) / 2,
-      rotate: 360,
-      duration: 0.55,
-      ease: 'power2.inOut',
-      onComplete: resolve,
-    });
-  });
-
+  const targetRect = {
+    left: to.left + (to.width - (fromRect?.width || 68)) / 2,
+    top: to.top + (to.height - (fromRect?.height || 95)) / 2,
+    width: to.width,
+    height: to.height,
+  };
+  await springGhostToRect(ghost, targetRect, { rotate: 8, scale: to.width / (fromRect?.width || 68) });
   ghost.remove();
   const stamp = document.createElement('div');
   stamp.className = 'bluff-stamp thwack';
